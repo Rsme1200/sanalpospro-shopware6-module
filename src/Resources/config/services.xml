@@ -33,5 +33,51 @@
             <argument type="service" id="custom_field_set_relation.repository"/>
         </service>
 
+        <!-- Dev 1: Entity Definitions (Contract C) -->
+        <service id="SanalposproPayment\Core\Content\WebhookLog\WebhookLogDefinition">
+            <tag name="shopware.entity.definition" entity="sanalpospro_webhook_log" />
+        </service>
+
+        <service id="SanalposproPayment\Core\Content\Installment\InstallmentDefinition">
+            <tag name="shopware.entity.definition" entity="sanalpospro_installment" />
+        </service>
+
+        <!-- Payment Handler and Utilities -->
+        <service id="SanalposproPayment\Service\SanalPosProPaymentHandler">
+            <argument type="service" id="Shopware\Core\Checkout\Order\Aggregate\OrderTransaction\OrderTransactionStateHandler"/>
+            <argument type="service" id="router"/>
+            <tag name="shopware.payment.method.async"/>
+        </service>
+
+        <service id="SanalposproPayment\Util\PaymentMethodInstaller">
+            <argument type="service" id="payment_method.repository"/>
+            <argument type="service" id="Shopware\Core\Framework\Plugin\Util\PluginIdProvider"/>
+        </service>
+
+        <service id="SanalposproPayment\Storefront\Controller\SanalPosProPaymentController" public="true">
+            <argument type="service" id="order_transaction.repository"/>
+            <call method="setContainer">
+                <argument type="service" id="service_container"/>
+            </call>
+            <call method="setTwig">
+                <argument type="service" id="twig"/>
+            </call>
+        </service>
+
+        <!-- Dev 3: Storefront Webhook Controller -->
+        <service id="SanalposproPayment\Storefront\Controller\WebhookController" public="true">
+            <argument type="service" id="Shopware\Core\Checkout\Order\Aggregate\OrderTransaction\OrderTransactionStateHandler"/>
+            <call method="setContainer">
+                <argument type="service" id="service_container"/>
+            </call>
+        </service>
+
+        <!-- Dev 3: IAPI Internal Bridge Controller -->
+        <service id="SanalposproPayment\Storefront\Controller\IapiController" public="true">
+            <call method="setContainer">
+                <argument type="service" id="service_container"/>
+            </call>
+        </service>
+
     </services>
 </container>

@@ -10,8 +10,8 @@
     "extra": {
         "shopware-plugin-class": "SanalposproPayment\\SanalPosPro",
         "label": {
-            "de-DE": "Skeleton plugin",
-            "en-GB": "Skeleton plugin"
+            "de-DE": "SanalPosPro",
+            "en-GB": "SanalPosPro"
         }
     },
     "autoload": {

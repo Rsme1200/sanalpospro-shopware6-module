@@ -1,0 +1,23 @@
+{
+  "base": "/bundles/sanalpospro/administration/",
+  "entryPoints": {
+    "sanal-pos-pro": {
+      "css": [],
+      "dynamic": [],
+      "js": [
+        "/bundles/sanalpospro/administration/assets/sanal-pos-pro-jTHzLKU-.js"
+      ],
+      "legacy": false,
+      "preload": []
+    }
+  },
+  "legacy": false,
+  "metadatas": {},
+  "version": [
+    "7.1.0",
+    7,
+    1,
+    0
+  ],
+  "viteServer": null
+}

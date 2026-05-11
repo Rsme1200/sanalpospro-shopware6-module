@@ -1,0 +1,18 @@
+{
+    "sanalpospro-webhook-log": {
+        "general": {
+            "title": "Webhook Logs",
+            "description": "View SanalPosPro webhook transaction logs"
+        },
+        "list": {
+            "title": "Webhook Logs",
+            "columnCreatedAt": "Date",
+            "columnOrderTxId": "Order Transaction ID",
+            "columnPaythorTxId": "PayThor Transaction ID",
+            "columnAction": "Action",
+            "columnStatus": "Status",
+            "columnAmount": "Amount",
+            "columnCurrency": "Currency"
+        }
+    }
+}
