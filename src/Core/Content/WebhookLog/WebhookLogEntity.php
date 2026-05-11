@@ -14,16 +14,16 @@ class WebhookLogEntity extends Entity
     use EntityIdTrait;
 
     /** Shopware order_transaction.id (maps to order_tx_id column) */
-    protected ?string $orderTxId = null;
+    protected string $orderTxId;
 
     /** PayThor gateway transaction_id (maps to paythor_tx_id column) */
     protected ?string $paythorTxId = null;
 
     /** 'webhook' | 'callback' (maps to action column) */
-    protected ?string $action = null;
+    protected string $action;
 
     /** 'success' | 'failed' | 'pending' | 'refunded' (maps to status column) */
-    protected ?string $status = null;
+    protected string $status;
 
     /** Transaction amount (maps to amount column) */
     protected ?float $amount = null;
@@ -38,12 +38,12 @@ class WebhookLogEntity extends Entity
     // Getters & Setters
     // -------------------------------------------------------------------------
 
-    public function getOrderTxId(): ?string
+    public function getOrderTxId(): string
     {
         return $this->orderTxId;
     }
 
-    public function setOrderTxId(?string $orderTxId): void
+    public function setOrderTxId(string $orderTxId): void
     {
         $this->orderTxId = $orderTxId;
     }
@@ -58,22 +58,22 @@ class WebhookLogEntity extends Entity
         $this->paythorTxId = $paythorTxId;
     }
 
-    public function getAction(): ?string
+    public function getAction(): string
     {
         return $this->action;
     }
 
-    public function setAction(?string $action): void
+    public function setAction(string $action): void
     {
         $this->action = $action;
     }
 
-    public function getStatus(): ?string
+    public function getStatus(): string
     {
         return $this->status;
     }
 
-    public function setStatus(?string $status): void
+    public function setStatus(string $status): void
     {
         $this->status = $status;
     }

@@ -1,0 +1,60 @@
+{% sw_extends '@Storefront/storefront/base.html.twig' %}
+
+{% block base_content %}
+<div class="container mt-5 mb-5" style="max-width: 800px; margin: 0 auto; min-height: 500px; text-align: center;">
+    
+    <!-- PayThor Payment Interface (React Iframe Container) -->
+    <div id="root"
+         data-platform="shopware"
+         data-app-id="105"
+         data-program-id="1">
+    </div>
+
+    <script>
+        // Setup Paythor environment variables
+        window.xfvv = 'shopware-dummy-xfvv-token';
+        window.target_url = '{{ returnUrl|raw }}';
+        window.store_url  = window.location.origin;
+        window.app_id = 105;
+        window.platform = 'shopware';
+        window.program_id = 1;
+        window.style_url = 'https://cdn.paythor.com/1/105/10.0.4/index.css';
+
+        window.generalSettings = {
+            order_status: { default_value: 'process', options: { 'process': 'Processing' } },
+            currency_convert: { default_value: 'no', options: { yes: 'Yes', no: 'No' } },
+            showInstallmentsTabs: { default_value: 'no', options: { yes: 'Yes', no: 'No' } },
+            paymentPageTheme: { default_value: 'modern', options: { classic: 'Classic', modern: 'Modern' } }
+        };
+
+        // Clean stale Paythor session data
+        try {
+            const forcedAppId = '105';
+            const markerKey = 'paythor-connect-app-id';
+            const staleKeys = [
+                'etc-token', 'etc-user-level', 'etc-is-impersonating',
+                'etc-original-admin-token', 'etc-impersonate-token'
+            ];
+            if (localStorage.getItem(markerKey) !== forcedAppId) {
+                staleKeys.forEach(k => localStorage.removeItem(k));
+                sessionStorage.clear();
+                localStorage.setItem(markerKey, forcedAppId);
+            }
+        } catch (e) {
+            console.warn('LocalStorage access denied for Paythor');
+        }
+
+        // Load CSS
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = window.style_url;
+        document.head.appendChild(link);
+
+        // Load JS
+        const script = document.createElement('script');
+        script.type = 'module';
+        script.src = 'https://cdn.paythor.com/1/105/10.0.4/index.js';
+        document.body.appendChild(script);
+    </script>
+</div>
+{% endblock %}

@@ -14,30 +14,30 @@ class InstallmentEntity extends Entity
     use EntityIdTrait;
 
     /** Issuing bank name (maps to bank_name column) */
-    protected ?string $bankName = null;
+    protected string $bankName;
 
     /** Card type e.g. 'visa', 'mastercard' (maps to card_type column) */
     protected ?string $cardType = null;
 
     /** Number of installments e.g. 3, 6, 9, 12 (maps to installment_count column) */
-    protected ?int $installmentCount = null;
+    protected int $installmentCount;
 
     /** Interest / surcharge rate in percent (maps to interest_rate column) */
-    protected ?float $interestRate = null;
+    protected float $interestRate = 0.00;
 
     /** Whether this installment plan is currently active (maps to is_active column) */
-    protected ?bool $isActive = null;
+    protected bool $isActive = true;
 
     // -------------------------------------------------------------------------
     // Getters & Setters
     // -------------------------------------------------------------------------
 
-    public function getBankName(): ?string
+    public function getBankName(): string
     {
         return $this->bankName;
     }
 
-    public function setBankName(?string $bankName): void
+    public function setBankName(string $bankName): void
     {
         $this->bankName = $bankName;
     }
@@ -52,32 +52,32 @@ class InstallmentEntity extends Entity
         $this->cardType = $cardType;
     }
 
-    public function getInstallmentCount(): ?int
+    public function getInstallmentCount(): int
     {
         return $this->installmentCount;
     }
 
-    public function setInstallmentCount(?int $installmentCount): void
+    public function setInstallmentCount(int $installmentCount): void
     {
         $this->installmentCount = $installmentCount;
     }
 
-    public function getInterestRate(): ?float
+    public function getInterestRate(): float
     {
         return $this->interestRate;
     }
 
-    public function setInterestRate(?float $interestRate): void
+    public function setInterestRate(float $interestRate): void
     {
         $this->interestRate = $interestRate;
     }
 
-    public function getIsActive(): ?bool
+    public function isActive(): bool
     {
         return $this->isActive;
     }
 
-    public function setIsActive(?bool $isActive): void
+    public function setIsActive(bool $isActive): void
     {
         $this->isActive = $isActive;
     }

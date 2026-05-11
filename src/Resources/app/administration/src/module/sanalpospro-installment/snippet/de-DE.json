@@ -1,9 +1,4 @@
 {
-    "sanalpospro": {
-        "general": {
-            "mainMenuItemGeneral": "SanalPosPro"
-        }
-    },
     "sanalpospro-installment": {
         "general": {
             "title": "Ratenpläne",
@@ -32,22 +27,6 @@
             "placeholderCardType": "z.B. Visa, Mastercard",
             "messageSaveSuccess": "Ratenplan erfolgreich gespeichert.",
             "messageSaveError": "Ratenplan konnte nicht gespeichert werden."
-        }
-    },
-    "sanalpospro-webhook-log": {
-        "general": {
-            "title": "Webhook-Protokolle",
-            "description": "SanalPosPro Webhook-Transaktionsprotokolle anzeigen"
-        },
-        "list": {
-            "title": "Webhook-Protokolle",
-            "columnCreatedAt": "Datum",
-            "columnOrderTxId": "Bestelltransaktions-ID",
-            "columnPaythorTxId": "PayThor-Transaktions-ID",
-            "columnAction": "Aktion",
-            "columnStatus": "Status",
-            "columnAmount": "Betrag",
-            "columnCurrency": "Währung"
         }
     }
 }

@@ -13,8 +13,8 @@
     "extra": {
         "shopware-plugin-class": "SanalposproPayment\\SanalPosPro",
         "label": {
-            "de-DE": "Sanal Pos Pro",
-            "en-GB": "Sanal Pos Pro"
+            "de-DE": "SanalPosPro",
+            "en-GB": "SanalPosPro"
         }
     },
     "autoload": {

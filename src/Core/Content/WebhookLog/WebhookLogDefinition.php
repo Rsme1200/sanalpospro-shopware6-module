@@ -10,7 +10,6 @@ use Shopware\Core\Framework\DataAbstractionLayer\Field\IdField;
 use Shopware\Core\Framework\DataAbstractionLayer\Field\StringField;
 use Shopware\Core\Framework\DataAbstractionLayer\Field\FloatField;
 use Shopware\Core\Framework\DataAbstractionLayer\Field\LongTextField;
-use Shopware\Core\Framework\DataAbstractionLayer\Field\DateTimeField;
 
 /**
  * DAL definition for `sanalpospro_webhook_log`.
@@ -40,19 +39,19 @@ class WebhookLogDefinition extends EntityDefinition
     protected function defineFields(): FieldCollection
     {
         return new FieldCollection([
-            // id  BINARY(16) PRIMARY KEY -- UUID
+            // id  BINARY(16) PRIMARY KEY — UUID
             (new IdField('id', 'id'))->addFlags(new Required(), new PrimaryKey()),
 
-            // order_tx_id  VARCHAR(128) NOT NULL -- Shopware order_transaction.id
+            // order_tx_id  VARCHAR(128) NOT NULL — Shopware order_transaction.id
             (new StringField('order_tx_id', 'orderTxId'))->addFlags(new Required()),
 
-            // paythor_tx_id  VARCHAR(128) NULL -- PayThor gateway transaction_id
+            // paythor_tx_id  VARCHAR(128) NULL — PayThor gateway transaction_id
             new StringField('paythor_tx_id', 'paythorTxId'),
 
-            // action  VARCHAR(32) NOT NULL -- 'webhook' | 'callback'
+            // action  VARCHAR(32) NOT NULL — 'webhook' | 'callback'
             (new StringField('action', 'action'))->addFlags(new Required()),
 
-            // status  VARCHAR(32) NOT NULL -- 'success' | 'failed' | 'pending' | 'refunded'
+            // status  VARCHAR(32) NOT NULL — 'success' | 'failed' | 'pending' | 'refunded'
             (new StringField('status', 'status'))->addFlags(new Required()),
 
             // amount  DECIMAL(20,4) NULL
@@ -61,7 +60,7 @@ class WebhookLogDefinition extends EntityDefinition
             // currency  CHAR(3) NULL
             new StringField('currency', 'currency'),
 
-            // raw_payload  LONGTEXT NULL -- full JSON
+            // raw_payload  LONGTEXT NULL — full JSON
             new LongTextField('raw_payload', 'rawPayload'),
         ]);
     }

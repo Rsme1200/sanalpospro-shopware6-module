@@ -16,8 +16,8 @@ use Shopware\Core\Framework\DataAbstractionLayer\Field\BoolField;
  * DAL definition for `sanalpospro_installment`.
  * Column names match Contract C exactly.
  *
- * Replaces Block/Product/Installments.php + .phtml from Magento — now a proper
- * Shopware entity so it can be managed via the Vue.js Admin CRUD module (Task 3.2).
+ * Replaces Block/Product/Installments.php from Magento — now a proper
+ * Shopware entity managed via the Vue.js Admin CRUD module (Task 3.2).
  */
 class InstallmentDefinition extends EntityDefinition
 {
@@ -41,7 +41,7 @@ class InstallmentDefinition extends EntityDefinition
     protected function defineFields(): FieldCollection
     {
         return new FieldCollection([
-            // id  BINARY(16) PRIMARY KEY -- UUID
+            // id  BINARY(16) PRIMARY KEY — UUID
             (new IdField('id', 'id'))->addFlags(new Required(), new PrimaryKey()),
 
             // bank_name  VARCHAR(128) NOT NULL
