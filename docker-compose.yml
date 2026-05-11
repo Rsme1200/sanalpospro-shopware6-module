@@ -1,0 +1,15 @@
+version: "3"
+services:
+  shopware:
+    image: dockware/dev:latest
+    container_name: shopware_dev
+    ports:
+      - "80:80"
+      - "3306:3306"
+    volumes:
+      - "db_volume:/var/lib/mysql"
+      # Sadece eklenti klasörünü bilgisayarınızdaki "plugins" klasörüne bağlıyoruz
+      - "./plugins:/var/www/html/custom/plugins"
+volumes:
+  db_volume:
+    driver: local
