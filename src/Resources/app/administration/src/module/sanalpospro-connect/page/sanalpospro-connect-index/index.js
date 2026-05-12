@@ -7,7 +7,7 @@ Shopware.Component.register('sanalpospro-connect-index', {
             <template #content>
                 <sw-card-view>
                     <!-- PayThor React App Container -->
-                    <div id="root" data-platform="shopware" data-app-id="105" data-program-id="1" style="min-height: 800px; width: 100%;"></div>
+                    <div id="root" data-platform="shopware" data-app-id="106" data-program-id="1" style="min-height: 800px; width: 100%;"></div>
                 </sw-card-view>
             </template>
         </sw-page>
@@ -27,13 +27,13 @@ Shopware.Component.register('sanalpospro-connect-index', {
             this.cleanupPayThorApp();
 
             // Setup Paythor environment variables
-            window.xfvv       = 'shopware-dummy-xfvv-token'; 
+            window.xfvv = 'shopware-dummy-xfvv-token';
             window.target_url = window.location.origin.replace('/admin', '') + '/sanalpospro/iapi/index';
-            window.store_url  = window.location.origin;
-            window.app_id     = 105;
-            window.platform   = 'shopware';
+            window.store_url = window.location.origin;
+            window.app_id = 106;
+            window.platform = 'shopware';
             window.program_id = 1;
-            window.style_url  = 'https://cdn.paythor.com/1/105/10.0.4/index.css';
+            window.style_url = 'https://cdn.paythor.com/1/106/10.0.4/index.css';
 
             window.generalSettings = {
                 order_status: { default_value: 'process', options: { 'process': 'Processing' } },
@@ -44,7 +44,7 @@ Shopware.Component.register('sanalpospro-connect-index', {
 
             // Clean stale Paythor session data
             try {
-                const forcedAppId = '105';
+                const forcedAppId = '106';
                 const markerKey = 'paythor-connect-app-id';
                 const staleKeys = [
                     'etc-token', 'etc-user-level', 'etc-is-impersonating',
@@ -70,17 +70,17 @@ Shopware.Component.register('sanalpospro-connect-index', {
             const script = document.createElement('script');
             script.id = 'paythor-script';
             script.type = 'module';
-            script.src = 'https://cdn.paythor.com/1/105/10.0.4/index.js?v=' + Date.now();
+            script.src = 'https://cdn.paythor.com/1/106/10.0.4/index.js?v=' + Date.now();
             document.body.appendChild(script);
         },
 
         cleanupPayThorApp() {
             const script = document.getElementById('paythor-script');
             if (script) script.remove();
-            
+
             const style = document.getElementById('paythor-style');
             if (style) style.remove();
-            
+
             // Try to force unmount React node if it holds memory
             const rootNode = document.getElementById('root');
             if (rootNode) rootNode.innerHTML = '';

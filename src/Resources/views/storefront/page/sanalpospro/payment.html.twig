@@ -6,7 +6,7 @@
     <!-- PayThor Payment Interface (React Iframe Container) -->
     <div id="root"
          data-platform="shopware"
-         data-app-id="105"
+         data-app-id="106"
          data-program-id="1">
     </div>
 
@@ -15,10 +15,10 @@
         window.xfvv = 'shopware-dummy-xfvv-token';
         window.target_url = '{{ returnUrl|raw }}';
         window.store_url  = window.location.origin;
-        window.app_id = 105;
+        window.app_id = 106;
         window.platform = 'shopware';
         window.program_id = 1;
-        window.style_url = 'https://cdn.paythor.com/1/105/10.0.4/index.css';
+        window.style_url = 'https://cdn.paythor.com/1/106/10.0.4/index.css';
 
         window.generalSettings = {
             order_status: { default_value: 'process', options: { 'process': 'Processing' } },
@@ -29,7 +29,7 @@
 
         // Clean stale Paythor session data
         try {
-            const forcedAppId = '105';
+            const forcedAppId = '106';
             const markerKey = 'paythor-connect-app-id';
             const staleKeys = [
                 'etc-token', 'etc-user-level', 'etc-is-impersonating',
@@ -53,7 +53,7 @@
         // Load JS
         const script = document.createElement('script');
         script.type = 'module';
-        script.src = 'https://cdn.paythor.com/1/105/10.0.4/index.js';
+        script.src = 'https://cdn.paythor.com/1/106/10.0.4/index.js';
         document.body.appendChild(script);
     </script>
 </div>
