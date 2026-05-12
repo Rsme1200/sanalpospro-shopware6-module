@@ -6,74 +6,71 @@
 
     <services>
 
+        <!-- ── Scheduled tasks ──────────────────────────────────────────── -->
         <service id="SanalposproPayment\ScheduledTask\ExampleTask">
             <tag name="shopware.scheduled.task"/>
         </service>
 
+        <!-- ── Event subscribers ────────────────────────────────────────── -->
         <service id="SanalposproPayment\Subscriber\MySubscriber">
             <tag name="kernel.event_subscriber"/>
         </service>
 
-        <service id="SanalposproPayment\Storefront\Controller\ExampleController" public="true">
-            <call method="setContainer">
-                <argument type="service" id="service_container"/>
-            </call>
+        <!-- ── Dev 1: DAL entity definitions (Contract C) ───────────────── -->
+        <service id="SanalposproPayment\Core\Content\WebhookLog\WebhookLogDefinition">
+            <tag name="shopware.entity.definition" entity="sanalpospro_webhook_log"/>
         </service>
 
-        <service id="SanalposproPayment\Core\Content\Example\SalesChannel\ExampleRoute">
-            <argument type="service" id="product.repository"/>
+        <service id="SanalposproPayment\Core\Content\Installment\InstallmentDefinition">
+            <tag name="shopware.entity.definition" entity="sanalpospro_installment"/>
         </service>
 
         <service id="SanalposproPayment\Core\Content\Yes\YesDefinition">
-            <tag name="shopware.entity.definition" entity="yes" />
+            <tag name="shopware.entity.definition" entity="yes"/>
         </service>
 
-        <!-- Dev 1 — Task 1.1: DAL entities (Contract C column names) -->
-        <service id="SanalposproPayment\Core\Content\WebhookLog\WebhookLogDefinition">
-            <tag name="shopware.entity.definition" entity="sanalpospro_webhook_log" />
-        </service>
-
-        <service id="SanalposproPayment\Core\Content\Installment\InstallmentDefinition">
-            <tag name="shopware.entity.definition" entity="sanalpospro_installment" />
-        </service>
-
-        <service id="SanalposproPayment\Service\CustomFieldsInstaller">
-            <argument type="service" id="custom_field_set.repository"/>
-            <argument type="service" id="custom_field_set_relation.repository"/>
-        </service>
-
-        <!-- Dev 1: Entity Definitions (Contract C) -->
-        <service id="SanalposproPayment\Core\Content\WebhookLog\WebhookLogDefinition">
-            <tag name="shopware.entity.definition" entity="sanalpospro_webhook_log" />
-        </service>
-
-        <service id="SanalposproPayment\Core\Content\Installment\InstallmentDefinition">
-            <tag name="shopware.entity.definition" entity="sanalpospro_installment" />
-        </service>
-
-        <!-- Payment Handler and Utilities -->
+        <!-- ── Dev 1: Payment handler ────────────────────────────────────── -->
         <service id="SanalposproPayment\Service\SanalPosProPaymentHandler">
             <argument type="service" id="Shopware\Core\Checkout\Order\Aggregate\OrderTransaction\OrderTransactionStateHandler"/>
             <argument type="service" id="router"/>
             <tag name="shopware.payment.method.async"/>
         </service>
 
+        <!-- ── Dev 1: Payment method installer ───────────────────────────── -->
         <service id="SanalposproPayment\Util\PaymentMethodInstaller">
             <argument type="service" id="payment_method.repository"/>
             <argument type="service" id="Shopware\Core\Framework\Plugin\Util\PluginIdProvider"/>
         </service>
 
-        <service id="SanalposproPayment\Storefront\Controller\SanalPosProPaymentController" public="true">
-            <argument type="service" id="order_transaction.repository"/>
+        <!-- ── Dev 1: Custom fields installer ────────────────────────────── -->
+        <service id="SanalposproPayment\Service\CustomFieldsInstaller">
+            <argument type="service" id="custom_field_set.repository"/>
+            <argument type="service" id="custom_field_set_relation.repository"/>
+        </service>
+
+        <!-- ── Dev 2: Storefront iframe + postMessage-bridge controller ──── -->
+        <service id="SanalposproPayment\Storefront\Controller\SanalPosProController" public="true">
+            <argument type="service" id="Shopware\Core\System\SystemConfig\SystemConfigService"/>
             <call method="setContainer">
                 <argument type="service" id="service_container"/>
             </call>
             <call method="setTwig">
                 <argument type="service" id="twig"/>
             </call>
+            <tag name="controller.service_arguments"/>
         </service>
 
-        <!-- Dev 3: Storefront Webhook Controller -->
+        <!-- ── Dev 3: API webhook controller (HMAC-signed, idempotent) ───── -->
+        <service id="SanalposproPayment\Core\Api\WebhookController" public="true">
+            <argument type="service" id="Shopware\Core\System\SystemConfig\SystemConfigService"/>
+            <argument type="service" id="sanalpospro_webhook_log.repository"/>
+            <argument type="service" id="Shopware\Core\Checkout\Order\Aggregate\OrderTransaction\OrderTransactionStateHandler"/>
+            <argument type="service" id="Doctrine\DBAL\Connection"/>
+            <argument type="service" id="logger"/>
+            <tag name="controller.service_arguments"/>
+        </service>
+
+        <!-- ── Dev 3: Storefront webhook bridge (legacy / CDN React flow) ── -->
         <service id="SanalposproPayment\Storefront\Controller\WebhookController" public="true">
             <argument type="service" id="Shopware\Core\Checkout\Order\Aggregate\OrderTransaction\OrderTransactionStateHandler"/>
             <call method="setContainer">
@@ -81,9 +78,22 @@
             </call>
         </service>
 
-        <!-- Dev 3: IAPI Internal Bridge Controller -->
+        <!-- ── Dev 3: Internal API bridge for PayThor CDN React app ─────── -->
         <service id="SanalposproPayment\Storefront\Controller\IapiController" public="true">
             <argument type="service" id="Shopware\Core\System\SystemConfig\SystemConfigService"/>
+            <argument type="service" id="http_client"/>
+            <argument type="service" id="logger"/>
+            <call method="setContainer">
+                <argument type="service" id="service_container"/>
+            </call>
+        </service>
+
+        <!-- ── Example sales channel route (skeleton) ────────────────────── -->
+        <service id="SanalposproPayment\Core\Content\Example\SalesChannel\ExampleRoute">
+            <argument type="service" id="product.repository"/>
+        </service>
+
+        <service id="SanalposproPayment\Storefront\Controller\ExampleController" public="true">
             <call method="setContainer">
                 <argument type="service" id="service_container"/>
             </call>

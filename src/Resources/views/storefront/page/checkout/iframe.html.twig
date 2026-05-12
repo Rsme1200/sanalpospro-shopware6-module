@@ -1,0 +1,17 @@
+{% sw_extends '@Storefront/storefront/base.html.twig' %}
+
+{% block base_content %}
+<div
+    data-sanalpospro-iframe="true"
+    data-transaction-id="{{ transactionId }}"
+    data-return-url="{{ returnUrl }}"
+    data-iframe-url="{{ iframeUrl }}"
+>
+    <iframe
+        src=""
+        frameborder="0"
+        style="width:100%; min-height:600px; border:none;"
+        allowfullscreen
+    ></iframe>
+</div>
+{% endblock %}

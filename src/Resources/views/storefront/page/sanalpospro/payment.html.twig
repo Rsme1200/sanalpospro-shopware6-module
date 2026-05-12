@@ -12,8 +12,8 @@
 
     <script>
         // Setup Paythor environment variables
-        window.xfvv = 'shopware-dummy-xfvv-token';
-        window.target_url = '{{ returnUrl|raw }}';
+        window.xfvv = 'shopware';
+        window.target_url = '{{ app.request.schemeAndHttpHost }}/sanalpospro/iapi/index';
         window.store_url  = window.location.origin;
         window.app_id = 106;
         window.platform = 'shopware';

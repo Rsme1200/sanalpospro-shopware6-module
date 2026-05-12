@@ -5,4 +5,5 @@
         https://symfony.com/schema/routing/routing-1.0.xsd">
 
     <import resource="../../Storefront/Controller" type="attribute" />
+    <import resource="../../Core/Api" type="attribute" />
 </routes>

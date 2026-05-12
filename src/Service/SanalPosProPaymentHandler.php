@@ -29,9 +29,9 @@ class SanalPosProPaymentHandler implements AsynchronousPaymentHandlerInterface
 
         // Müşteriyi SanalPosPro'nun kendi oluşturduğumuz özel ödeme sayfasına (Storefront Route) yönlendiriyoruz.
         // O sayfada CDN React Iframe açılıp kart bilgileri istenecek.
-        $redirectUrl = $this->router->generate('frontend.sanalpospro.payment.page', [
+        $redirectUrl = $this->router->generate('frontend.sanalpospro.iframe', [
             'transactionId' => $transactionId,
-            'returnUrl' => $transaction->getReturnUrl()
+            'returnUrl'     => $transaction->getReturnUrl(),
         ]);
 
         return new RedirectResponse($redirectUrl);
