@@ -65,6 +65,12 @@ Shopware.Component.register('sanalpospro-connect-index', {
 
             let xfvv       = 'shopware';
             let targetPath = '/sanalpospro/iapi/index';
+            let savedSettings = {
+                order_status:         'process',
+                currency_convert:     'no',
+                showInstallmentsTabs: 'no',
+                paymentPageTheme:     'modern',
+            };
 
             try {
                 const token = Shopware.Context.api.authToken && Shopware.Context.api.authToken.access;
@@ -80,6 +86,9 @@ Shopware.Component.register('sanalpospro-connect-index', {
                         const cfg  = await response.json();
                         xfvv       = cfg.xfvv      || xfvv;
                         targetPath = cfg.target_url || targetPath;
+                        if (cfg.module_settings && typeof cfg.module_settings === 'object') {
+                            savedSettings = Object.assign(savedSettings, cfg.module_settings);
+                        }
                     } else {
                         console.error('SanalPosPro: Failed to fetch admin config', response.status);
                     }
@@ -102,10 +111,10 @@ Shopware.Component.register('sanalpospro-connect-index', {
             window.style_url  = `${CDN_BASE}/index.css`;
 
             window.generalSettings = {
-                order_status:         { default_value: 'process', options: { process: 'Processing' } },
-                currency_convert:     { default_value: 'no',      options: { yes: 'Yes', no: 'No' } },
-                showInstallmentsTabs: { default_value: 'no',      options: { yes: 'Yes', no: 'No' } },
-                paymentPageTheme:     { default_value: 'modern',  options: { classic: 'Classic', modern: 'Modern' } },
+                order_status:         { default_value: savedSettings.order_status,         options: { process: 'Processing' } },
+                currency_convert:     { default_value: savedSettings.currency_convert,     options: { yes: 'Yes', no: 'No' } },
+                showInstallmentsTabs: { default_value: savedSettings.showInstallmentsTabs, options: { yes: 'Yes', no: 'No' } },
+                paymentPageTheme:     { default_value: savedSettings.paymentPageTheme,     options: { classic: 'Classic', modern: 'Modern' } },
             };
 
             const link = document.createElement('link');

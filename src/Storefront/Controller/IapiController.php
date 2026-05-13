@@ -204,6 +204,8 @@ class IapiController extends StorefrontController
 
         $this->systemConfigService->set('SanalPosPro.config.installments', json_encode($options));
 
+        $this->logger->info('SanalPosPro: installment options saved', ['count' => is_array($options) ? count($options) : 0]);
+
         return $this->success('Installment options updated.');
     }
 
@@ -230,7 +232,47 @@ class IapiController extends StorefrontController
             }
         }
 
+        $this->logger->info('SanalPosPro: module settings updated', ['keys' => array_keys($updated)]);
+
         return $this->success('Module settings updated.', ['updated_settings' => $updated]);
+    }
+
+    /**
+     * Return the persisted installment options so the CDN React admin app can
+     * hydrate its "Taksitler" (Installments) tab on page load.
+     */
+    private function actionGetInstallmentOptions(array $params): array
+    {
+        $raw = (string) ($this->systemConfigService->get('SanalPosPro.config.installments') ?? '');
+        $options = json_decode($raw, true);
+
+        if (!is_array($options)) {
+            $options = [];
+        }
+
+        return $this->success('Installment options retrieved.', ['installmentOptions' => $options]);
+    }
+
+    /**
+     * Return the persisted module settings so the CDN React admin app can
+     * hydrate its "Ayarlar" (Settings) tab on page load.
+     */
+    private function actionGetModuleSettings(array $params): array
+    {
+        $settingsMap = [
+            'order_status'         => 'orderStatus',
+            'currency_convert'     => 'currencyConvert',
+            'showInstallmentsTabs' => 'showInstallmentsTabs',
+            'paymentPageTheme'     => 'paymentPageTheme',
+        ];
+
+        $settings = [];
+        foreach ($settingsMap as $key => $configKey) {
+            $value = $this->systemConfigService->get('SanalPosPro.config.' . $configKey);
+            $settings[$key] = $value !== null ? (string) $value : '';
+        }
+
+        return $this->success('Module settings retrieved.', ['moduleSettings' => $settings]);
     }
 
     private function actionGetMerchantInfo(array $params): array

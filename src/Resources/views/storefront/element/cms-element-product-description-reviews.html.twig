@@ -1,0 +1,155 @@
+{% sw_extends '@Storefront/storefront/element/cms-element-product-description-reviews.html.twig' %}
+
+{% block element_product_description_reviews_tabs_navigation_review %}
+    {{ parent() }}
+
+    {# SanalPosPro Installment Tab Navigation #}
+    {% if page.extensions.sanalposproInstallments is defined and page.extensions.sanalposproInstallments.enabled %}
+        <li class="nav-item">
+            <a class="nav-link product-detail-tab-navigation-link" 
+               id="sanalpospro-installments-tab" 
+               data-bs-toggle="tab" 
+               data-off-canvas-tabs="true"
+               href="#sanalpospro-installments-tab-pane" 
+               role="tab" 
+               aria-controls="sanalpospro-installments-tab-pane" 
+               aria-selected="false">
+                {{ "sanalpospro.installments.tabTitle"|trans|sw_sanitize }}
+                <span class="product-detail-tab-navigation-icon">
+                    {% sw_icon 'arrow-medium-right' style {'pack':'solid'} %}
+                </span>
+            </a>
+        </li>
+    {% endif %}
+{% endblock %}
+
+{% block element_product_description_reviews_tabs_content_review %}
+    {{ parent() }}
+
+    {# SanalPosPro Installment Tab Content #}
+    {% if page.extensions.sanalposproInstallments is defined and page.extensions.sanalposproInstallments.enabled %}
+        {% set installmentData = page.extensions.sanalposproInstallments %}
+
+        <div class="tab-pane fade" 
+             id="sanalpospro-installments-tab-pane" 
+             role="tabpanel" 
+             aria-labelledby="sanalpospro-installments-tab">
+             
+            {% if installmentData.theme == 'modern' %}
+                {# MODERN THEME (TABS) #}
+                <div class="sppro-installment-container" data-sanalpospro-installment="true">
+                    {# Card Family Tab Header #}
+                    <div class="sppro-tab-header">
+                        {% for family in installmentData.activeFamilies %}
+                            <div class="sppro-tab-item{% if loop.first %} active{% endif %}" data-sppro-card-target="{{ family }}">
+                                <img height="40" 
+                                     src="https://cdn.paythor.com/assets/cards/{{ family }}.png" 
+                                     alt="{{ family }}" 
+                                     loading="lazy"
+                                     class="sppro-card-image">
+                            </div>
+                        {% endfor %}
+                    </div>
+
+                    {# Installment Tables #}
+                    <div class="sppro-tab-content">
+                        {% for family in installmentData.activeFamilies %}
+                            {% set rows = installmentData.familyRows[family] %}
+                            {% if rows is not empty %}
+                                <div class="sppro-tab-pane{% if loop.first %} active{% endif %}" data-sppro-card-content="{{ family }}">
+                                    <table class="sppro-installment-table">
+                                        <thead>
+                                            <tr>
+                                                <th width="33.33%">{{ "sanalpospro.installments.columnInstallment"|trans|sw_sanitize }}</th>
+                                                <th width="33.33%">{{ "sanalpospro.installments.columnMonthly"|trans|sw_sanitize }}</th>
+                                                <th width="33.33%">{{ "sanalpospro.installments.columnTotal"|trans|sw_sanitize }}</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for row in rows %}
+                                                {% if row.active %}
+                                                    <tr class="sppro-row-available">
+                                                        <td>
+                                                            <span class="sppro-installment-count">{{ row.months }}</span>
+                                                            <span class="sppro-installment-text">{{ "sanalpospro.installments.installment"|trans|sw_sanitize }}</span>
+                                                        </td>
+                                                        <td class="sppro-monthly-payment">
+                                                            <span class="sppro-price">{{ row.monthly }} {{ installmentData.currencySymbol }}</span>
+                                                        </td>
+                                                        <td class="sppro-total-amount">
+                                                            <span class="sppro-price">{{ row.total }} {{ installmentData.currencySymbol }}</span>
+                                                        </td>
+                                                    </tr>
+                                                {% endif %}
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            {% endif %}
+                        {% endfor %}
+                    </div>
+
+                    {# Note #}
+                    <div class="sppro-installment-note">
+                        <p>{{ "sanalpospro.installments.note"|trans|sw_sanitize }}</p>
+                    </div>
+                </div>
+            {% else %}
+                {# CLASSIC THEME (GRID) #}
+                <div class="sppro-classic-wrapper">
+                    <div class="sppro-classic-container">
+                        {% for family in installmentData.activeFamilies %}
+                            {% set rows = installmentData.familyRows[family] %}
+                            <div class="sppro-classic-card">
+                                <table class="sppro-classic-table">
+                                    <thead>
+                                        <tr>
+                                            <td colspan="3" class="sppro-classic-card-head">
+                                                <img src="https://cdn.paythor.com/assets/cards/{{ family }}.png"
+                                                     alt="{{ family }}"
+                                                     class="sppro-card-image">
+                                            </td>
+                                        </tr>
+                                        <tr>
+                                            <th>{{ "sanalpospro.installments.columnInstallment"|trans|sw_sanitize }}</th>
+                                            <th>{{ "sanalpospro.installments.columnMonthly"|trans|sw_sanitize }}</th>
+                                            <th>{{ "sanalpospro.installments.columnTotal"|trans|sw_sanitize }}</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for row in rows %}
+                                            <tr class="{{ row.active ? '' : 'sppro-classic-row-empty' }}">
+                                                <td>
+                                                    <span class="sppro-installment-count">{{ row.months }}</span>
+                                                    <span class="sppro-installment-text">{{ "sanalpospro.installments.installment"|trans|sw_sanitize }}</span>
+                                                </td>
+                                                <td>
+                                                    {% if row.active %}
+                                                        {{ row.monthly }} {{ installmentData.currencySymbol }}
+                                                    {% else %}
+                                                        -
+                                                    {% endif %}
+                                                </td>
+                                                <td>
+                                                    {% if row.active %}
+                                                        {{ row.total }} {{ installmentData.currencySymbol }}
+                                                    {% else %}
+                                                        -
+                                                    {% endif %}
+                                                </td>
+                                            </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        {% endfor %}
+                    </div>
+
+                    <div class="sppro-classic-note">
+                        <p>{{ "sanalpospro.installments.note"|trans|sw_sanitize }}</p>
+                    </div>
+                </div>
+            {% endif %}
+        </div>
+    {% endif %}
+{% endblock %}

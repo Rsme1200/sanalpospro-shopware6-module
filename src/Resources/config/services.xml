@@ -16,6 +16,11 @@
             <tag name="kernel.event_subscriber"/>
         </service>
 
+        <service id="SanalposproPayment\Subscriber\InstallmentSubscriber">
+            <argument type="service" id="Shopware\Core\System\SystemConfig\SystemConfigService"/>
+            <tag name="kernel.event_subscriber"/>
+        </service>
+
         <!-- ── Dev 1: DAL entity definitions (Contract C) ───────────────── -->
         <service id="SanalposproPayment\Core\Content\WebhookLog\WebhookLogDefinition">
             <tag name="shopware.entity.definition" entity="sanalpospro_webhook_log"/>

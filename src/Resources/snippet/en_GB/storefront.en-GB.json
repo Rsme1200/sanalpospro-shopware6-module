@@ -1,0 +1,12 @@
+{
+  "sanalpospro": {
+    "installments": {
+      "tabTitle": "Installments",
+      "columnInstallment": "Installment",
+      "columnMonthly": "Monthly Pay.",
+      "columnTotal": "Total Amount",
+      "installment": "Installment",
+      "note": "Installment amounts are estimated and may vary depending on the bank's campaigns and interest rates."
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "sanalpospro": {
+    "installments": {
+      "tabTitle": "Taksitler",
+      "columnInstallment": "Taksit Sayısı",
+      "columnMonthly": "Aylık Ödeme",
+      "columnTotal": "Toplam Tutar",
+      "installment": "Taksit",
+      "note": "Taksit tutarları tahmini olup, bankanın kampanyalarına ve faiz oranlarına göre değişiklik gösterebilir."
+    }
+  }
+}

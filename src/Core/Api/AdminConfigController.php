@@ -47,9 +47,31 @@ class AdminConfigController extends AbstractController
             $xfvv = 'shopware';
         }
 
+        // Hydrate the saved module settings so the CDN React panel can
+        // pre-select the correct option in its "Eklenti Ayarları" dropdowns
+        // (Sipariş Durumu, Döviz Dönüşümü, Taksit Sekmelerini Göster,
+        // Taksit Sekmesi Görünümü). Without this every page load would reset
+        // the dropdowns to the hard-coded defaults (no / modern), which is
+        // why the installments tab never appeared on the storefront after
+        // the merchant saved their preference.
+        $settings = [
+            'order_status'         => (string) ($this->systemConfigService->get('SanalPosPro.config.orderStatus') ?? 'process'),
+            'currency_convert'     => (string) ($this->systemConfigService->get('SanalPosPro.config.currencyConvert') ?? 'no'),
+            'showInstallmentsTabs' => (string) ($this->systemConfigService->get('SanalPosPro.config.showInstallmentsTabs') ?? 'no'),
+            'paymentPageTheme'     => (string) ($this->systemConfigService->get('SanalPosPro.config.paymentPageTheme') ?? 'modern'),
+        ];
+
+        // Normalize empty values to sane fallbacks so the React panel
+        // always receives a valid option key.
+        if ($settings['order_status'] === '')         { $settings['order_status']         = 'process'; }
+        if ($settings['currency_convert'] === '')     { $settings['currency_convert']     = 'no'; }
+        if ($settings['showInstallmentsTabs'] === '') { $settings['showInstallmentsTabs'] = 'no'; }
+        if ($settings['paymentPageTheme'] === '')     { $settings['paymentPageTheme']     = 'modern'; }
+
         return new JsonResponse([
-            'xfvv'       => $xfvv,
-            'target_url' => '/sanalpospro/iapi/index',
+            'xfvv'            => $xfvv,
+            'target_url'      => '/sanalpospro/iapi/index',
+            'module_settings' => $settings,
         ]);
     }
 }
