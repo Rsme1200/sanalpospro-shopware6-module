@@ -16,6 +16,14 @@
             return _nativeFetch(input, init);
         }
 
+        // Skip CDN requests — adding custom headers to static CDN files
+        // triggers CORS preflight which the CDN server does not support.
+        // Only patch headers for API endpoints.
+        const isCdnUrl = url.includes('cdn.paythor.com');
+        if (isCdnUrl) {
+            return _nativeFetch(input, init);
+        }
+
         init = init ? Object.assign({}, init) : {};
 
         // Patch etc-app-id header on every request to PayThor/SanalPosPro APIs.

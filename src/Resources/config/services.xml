@@ -70,6 +70,12 @@
             <tag name="controller.service_arguments"/>
         </service>
 
+        <!-- ── Dev 3: Admin config endpoint for CDN React app ──────────── -->
+        <service id="SanalposproPayment\Core\Api\AdminConfigController" public="true">
+            <argument type="service" id="Shopware\Core\System\SystemConfig\SystemConfigService"/>
+            <tag name="controller.service_arguments"/>
+        </service>
+
         <!-- ── Dev 3: Storefront webhook bridge (legacy / CDN React flow) ── -->
         <service id="SanalposproPayment\Storefront\Controller\WebhookController" public="true">
             <argument type="service" id="Shopware\Core\Checkout\Order\Aggregate\OrderTransaction\OrderTransactionStateHandler"/>
