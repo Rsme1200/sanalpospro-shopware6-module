@@ -31,15 +31,38 @@ class SanalPosPro extends Plugin
     public function activate(ActivateContext $activateContext): void
     {
         $this->getPaymentMethodInstaller()->setPaymentMethodIsActive(true, $activateContext->getContext());
-        
-        // Force bind payment method to all sales channels to prevent it from hiding in storefront
-        /** @var \Doctrine\DBAL\Connection $connection */
-        $connection = $this->container->get(\Doctrine\DBAL\Connection::class);
-        $connection->executeStatement("
-            INSERT IGNORE INTO sales_channel_payment_method (sales_channel_id, payment_method_id)
-            SELECT id, (SELECT id FROM payment_method WHERE handler_identifier='SanalposproPayment\\\\Service\\\\SanalPosProPaymentHandler' LIMIT 1)
-            FROM sales_channel;
-        ");
+        $this->addPaymentMethodToAllSalesChannels($activateContext->getContext());
+    }
+
+    private function addPaymentMethodToAllSalesChannels(\Shopware\Core\Framework\Context $context): void
+    {
+        /** @var \Shopware\Core\Framework\DataAbstractionLayer\EntityRepository $pmRepo */
+        $pmRepo = $this->container->get('payment_method.repository');
+        /** @var \Shopware\Core\Framework\DataAbstractionLayer\EntityRepository $scRepo */
+        $scRepo = $this->container->get('sales_channel.repository');
+
+        $criteria = new \Shopware\Core\Framework\DataAbstractionLayer\Search\Criteria();
+        $criteria->addFilter(new \Shopware\Core\Framework\DataAbstractionLayer\Search\Filter\EqualsFilter(
+            'handlerIdentifier',
+            \SanalposproPayment\Service\SanalPosProPaymentHandler::class
+        ));
+        $paymentMethodId = $pmRepo->searchIds($criteria, $context)->firstId();
+
+        if (!$paymentMethodId) {
+            return;
+        }
+
+        $salesChannelIds = $scRepo->searchIds(
+            new \Shopware\Core\Framework\DataAbstractionLayer\Search\Criteria(),
+            $context
+        )->getIds();
+
+        foreach ($salesChannelIds as $scId) {
+            $scRepo->update([[
+                'id'             => $scId,
+                'paymentMethods' => [['id' => $paymentMethodId]],
+            ]], $context);
+        }
     }
 
     public function deactivate(DeactivateContext $deactivateContext): void

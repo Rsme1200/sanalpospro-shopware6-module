@@ -1,17 +1,182 @@
 {% sw_extends '@Storefront/storefront/base.html.twig' %}
 
 {% block base_content %}
-<div
-    data-sanalpospro-iframe="true"
-    data-transaction-id="{{ transactionId }}"
-    data-return-url="{{ returnUrl }}"
-    data-iframe-url="{{ iframeUrl }}"
->
-    <iframe
-        src=""
-        frameborder="0"
-        style="width:100%; min-height:600px; border:none;"
-        allowfullscreen
-    ></iframe>
+<div class="container" style="max-width:760px; margin:40px auto; padding:0 16px;">
+
+    <div
+        id="sp-payment-wrapper"
+        data-sanalpospro-iframe="true"
+        data-transaction-id="{{ transactionId }}"
+        data-return-url="{{ returnUrl }}"
+        data-iframe-url=""
+    >
+
+        {# ── Step 1: Gateway selection ────────────────────────────────────── #}
+        <div id="sp-step-select">
+            <h3 style="margin-bottom:20px; font-size:1.2rem;">Select Payment Method</h3>
+
+            <div id="sp-gateway-list" style="margin-bottom:20px;">
+                <div id="sp-loading" style="color:#666; padding:12px 0;">
+                    Loading payment methods&hellip;
+                </div>
+            </div>
+
+            <button
+                id="sp-pay-btn"
+                type="button"
+                style="display:none; padding:12px 32px; background:#0070f3; color:#fff; border:none; border-radius:6px; font-size:1rem; cursor:pointer;"
+            >
+                Continue to Payment
+            </button>
+        </div>
+
+        {# ── Step 2: Payment iframe ────────────────────────────────────────── #}
+        <div id="sp-step-iframe" style="display:none;">
+            <iframe
+                id="sp-iframe"
+                src=""
+                frameborder="0"
+                style="width:100%; min-height:620px; border:none; border-radius:6px;"
+                allowfullscreen
+            ></iframe>
+        </div>
+
+        {# ── Error area ───────────────────────────────────────────────────── #}
+        <div id="sp-error" style="display:none; color:#c0392b; background:#fdf0ef; padding:12px 16px; border-radius:6px; margin-top:16px;"></div>
+
+    </div>
+
+    <script>
+    (function () {
+        'use strict';
+
+        var TRANSACTION_ID = '{{ transactionId|e('js') }}';
+        var RETURN_URL     = '{{ returnUrl|e('js') }}';
+        var IAPI_URL       = window.location.origin + '/sanalpospro/iapi/index';
+
+        var selectedGateway = null;
+
+        function callIapi(action, params) {
+            return fetch(IAPI_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({
+                    iapi_action: action,
+                    iapi_params: JSON.stringify(params)
+                })
+            }).then(function (r) { return r.json(); });
+        }
+
+        function showError(msg) {
+            var el = document.getElementById('sp-error');
+            el.textContent = msg;
+            el.style.display = 'block';
+        }
+
+        function showIframe(url) {
+            document.getElementById('sp-payment-wrapper').setAttribute('data-iframe-url', url);
+            document.getElementById('sp-step-select').style.display = 'none';
+            document.getElementById('sp-step-iframe').style.display = 'block';
+            document.getElementById('sp-iframe').src = url;
+        }
+
+        function createPayment(gateway) {
+            document.getElementById('sp-step-select').innerHTML =
+                '<p style="color:#666; padding:12px 0;">Creating payment session&hellip;</p>';
+
+            callIapi('createPayment', {
+                iapi_transactionId: TRANSACTION_ID,
+                iapi_returnUrl:     RETURN_URL,
+                iapi_storeUrl:      window.location.origin,
+                iapi_gateway:       gateway || 'creditcard'
+            }).then(function (data) {
+                if (data.status !== 'success') {
+                    showError('Payment error: ' + (data.message || 'Unknown error. Please try again.'));
+                    return;
+                }
+                var iframeUrl = data.data && data.data.iframe_url;
+                if (!iframeUrl) {
+                    showError('No payment URL received from gateway.');
+                    return;
+                }
+                showIframe(iframeUrl);
+            }).catch(function (err) {
+                showError('Request failed: ' + err.message);
+            });
+        }
+
+        window.addEventListener('message', function (event) {
+            if (event.origin !== window.location.origin) return;
+            var d = event.data;
+            if (!d || d.source !== 'paythor_sanalpospro') return;
+
+            if (d.status === 'success') {
+                window.location.replace(RETURN_URL);
+            } else {
+                var msg = d.message ? ' (' + d.message + ')' : '';
+                showError('Payment ' + (d.status || 'failed') + msg + '. Please try again.');
+                document.getElementById('sp-step-iframe').style.display = 'none';
+                document.getElementById('sp-step-select').style.display  = 'block';
+            }
+        });
+
+        callIapi('getPaymentGateways', {}).then(function (data) {
+            var listEl = document.getElementById('sp-gateway-list');
+
+            if (data.status !== 'success' || !Array.isArray(data.data) || data.data.length === 0) {
+                createPayment(null);
+                return;
+            }
+
+            var gateways = data.data;
+            var html = '';
+
+            gateways.forEach(function (gw, i) {
+                var code  = gw.id || gw.code || gw.name || ('gw_' + i);
+                var name  = gw.name || gw.label || code;
+                var logo  = gw.logo || gw.image || gw.icon || '';
+                var domId = 'sp-gw-' + i;
+
+                html += '<label for="' + domId + '" style="'
+                     +  'display:flex; align-items:center; gap:14px; padding:14px 16px;'
+                     +  'border:2px solid #e5e7eb; border-radius:8px; cursor:pointer;'
+                     +  'margin-bottom:10px; transition:border-color .15s;">'
+                     +  '<input type="radio" id="' + domId + '" name="sp_gateway" value="' + code + '" style="width:18px;height:18px;">';
+
+                if (logo) {
+                    html += '<img src="' + logo + '" alt="' + name + '" style="height:32px; max-width:80px; object-fit:contain;">';
+                }
+
+                html += '<span style="font-size:.95rem; font-weight:500;">' + name + '</span>';
+                html += '</label>';
+            });
+
+            listEl.innerHTML = html;
+
+            var payBtn = document.getElementById('sp-pay-btn');
+
+            listEl.querySelectorAll('input[type=radio]').forEach(function (radio) {
+                radio.addEventListener('change', function () {
+                    selectedGateway = this.value;
+                    payBtn.style.display = 'inline-block';
+                    listEl.querySelectorAll('label').forEach(function (l) {
+                        l.style.borderColor = '#e5e7eb';
+                    });
+                    this.closest('label').style.borderColor = '#0070f3';
+                });
+            });
+
+            payBtn.addEventListener('click', function () {
+                if (!selectedGateway) return;
+                createPayment(selectedGateway);
+            });
+
+        }).catch(function () {
+            createPayment(null);
+        });
+
+    }());
+    </script>
+
 </div>
 {% endblock %}

@@ -2,47 +2,63 @@
 
 namespace SanalposproPayment\Service;
 
+use Shopware\Core\Checkout\Cart\Cart;
 use Shopware\Core\Checkout\Order\Aggregate\OrderTransaction\OrderTransactionStateHandler;
-use Shopware\Core\Checkout\Payment\Cart\AsyncPaymentTransactionStruct;
-use Shopware\Core\Checkout\Payment\Cart\PaymentHandler\AsynchronousPaymentHandlerInterface;
+use Shopware\Core\Checkout\Payment\Cart\PaymentHandler\AbstractPaymentHandler;
+use Shopware\Core\Checkout\Payment\Cart\PaymentHandler\PaymentHandlerType;
+use Shopware\Core\Checkout\Payment\Cart\PaymentTransactionStruct;
+use Shopware\Core\Framework\Context;
+use Shopware\Core\Framework\Struct\Struct;
 use Shopware\Core\Framework\Validation\DataBag\RequestDataBag;
 use Shopware\Core\System\SalesChannel\SalesChannelContext;
 use Symfony\Component\HttpFoundation\RedirectResponse;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\RouterInterface;
 
-class SanalPosProPaymentHandler implements AsynchronousPaymentHandlerInterface
+class SanalPosProPaymentHandler extends AbstractPaymentHandler
 {
-    private OrderTransactionStateHandler $transactionStateHandler;
-    private RouterInterface $router;
-
     public function __construct(
-        OrderTransactionStateHandler $transactionStateHandler,
-        RouterInterface $router
-    ) {
-        $this->transactionStateHandler = $transactionStateHandler;
-        $this->router = $router;
+        private readonly OrderTransactionStateHandler $transactionStateHandler,
+        private readonly RouterInterface $router,
+    ) {}
+
+    public function supports(PaymentHandlerType $type, string $paymentMethodId, Context $context): bool
+    {
+        return false;
     }
 
-    public function pay(AsyncPaymentTransactionStruct $transaction, RequestDataBag $dataBag, SalesChannelContext $salesChannelContext): RedirectResponse
-    {
-        $transactionId = $transaction->getOrderTransaction()->getId();
+    public function pay(
+        Request $request,
+        PaymentTransactionStruct $transaction,
+        Context $context,
+        ?Struct $validateStruct
+    ): ?RedirectResponse {
+        $transactionId = $transaction->getOrderTransactionId();
+        $returnUrl     = $transaction->getReturnUrl();
 
-        // Müşteriyi SanalPosPro'nun kendi oluşturduğumuz özel ödeme sayfasına (Storefront Route) yönlendiriyoruz.
-        // O sayfada CDN React Iframe açılıp kart bilgileri istenecek.
         $redirectUrl = $this->router->generate('frontend.sanalpospro.iframe', [
             'transactionId' => $transactionId,
-            'returnUrl'     => $transaction->getReturnUrl(),
+            'returnUrl'     => $returnUrl,
         ]);
 
         return new RedirectResponse($redirectUrl);
     }
 
-    public function finalize(AsyncPaymentTransactionStruct $transaction, RequestDataBag $dataBag, SalesChannelContext $salesChannelContext): void
-    {
-        // Müşteri React formunu doldurup, ReturnURL üzerinden Shopware'e geri döndüğünde burası tetiklenir.
-        // İstersek işlemi direkt "paid" (ödendi) yapabiliriz veya Webhook'a bırakabiliriz.
-        // Şimdilik siparişi işlemde (process) bırakalım, webhook "paid" yapacaktır.
-        
-        $this->transactionStateHandler->process($transaction->getOrderTransaction()->getId(), $salesChannelContext->getContext());
+    public function finalize(
+        Request $request,
+        PaymentTransactionStruct $transaction,
+        Context $context
+    ): void {
+        // p_id is appended by our callback controller only when PayThor confirmed
+        // the payment (approved or status-unknown). Absence means the customer
+        // went back without completing payment → fail the transaction so Shopware
+        // shows the retry UI in My Account > Orders.
+        $pId = trim((string) $request->query->get('p_id', ''));
+
+        if ($pId !== '') {
+            $this->transactionStateHandler->paid($transaction->getOrderTransactionId(), $context);
+        } else {
+            $this->transactionStateHandler->fail($transaction->getOrderTransactionId(), $context);
+        }
     }
 }

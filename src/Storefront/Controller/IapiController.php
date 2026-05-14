@@ -4,6 +4,8 @@ namespace SanalposproPayment\Storefront\Controller;
 
 use Psr\Log\LoggerInterface;
 use Shopware\Core\Framework\Context;
+use Shopware\Core\Framework\DataAbstractionLayer\EntityRepository;
+use Shopware\Core\Framework\DataAbstractionLayer\Search\Criteria;
 use Shopware\Core\System\SystemConfig\SystemConfigService;
 use Shopware\Storefront\Controller\StorefrontController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -21,10 +23,14 @@ class IapiController extends StorefrontController
     private const CONFIG_PUBLIC_KEY      = 'SanalPosPro.config.publicApiKey';
     private const CONFIG_SECRET_KEY      = 'SanalPosPro.config.secretApiKey';
 
+    private ?Context $requestContext = null;
+    private string $requestIp        = '127.0.0.1';
+
     public function __construct(
         private readonly SystemConfigService $systemConfigService,
         private readonly HttpClientInterface $httpClient,
         private readonly LoggerInterface $logger,
+        private readonly EntityRepository $orderTransactionRepository,
     ) {}
 
     #[Route(
@@ -45,6 +51,9 @@ class IapiController extends StorefrontController
             $response->headers->set('Access-Control-Allow-Methods', 'POST, OPTIONS');
             return $response;
         }
+
+        $this->requestContext = $context;
+        $this->requestIp     = $request->getClientIp() ?? '127.0.0.1';
 
         $action     = (string) $request->request->get('iapi_action', '');
         $xfvv       = (string) $request->request->get('iapi_xfvv', '');
@@ -105,9 +114,8 @@ class IapiController extends StorefrontController
 
         $data = $this->callCheckAccessToken($token, $pub, $sec);
 
-        // "Merchant ID mismatch" means the stored keys belong to a DIFFERENT merchant
-        // than the one who just logged in (e.g. the store is being reconnected to a new
-        // PayThor account).  Clear the stale keys, re-fetch for the new merchant, retry.
+        // "Merchant ID mismatch" means the stored keys belong to a DIFFERENT merchant.
+        // Clear the stale keys, re-fetch for the new merchant, retry.
         if (
             ($data['status'] ?? '') !== 'success'
             && str_contains(strtolower((string) ($data['message'] ?? '')), 'mismatch')
@@ -204,8 +212,6 @@ class IapiController extends StorefrontController
 
         $this->systemConfigService->set('SanalPosPro.config.installments', json_encode($options));
 
-        $this->logger->info('SanalPosPro: installment options saved', ['count' => is_array($options) ? count($options) : 0]);
-
         return $this->success('Installment options updated.');
     }
 
@@ -232,47 +238,7 @@ class IapiController extends StorefrontController
             }
         }
 
-        $this->logger->info('SanalPosPro: module settings updated', ['keys' => array_keys($updated)]);
-
         return $this->success('Module settings updated.', ['updated_settings' => $updated]);
-    }
-
-    /**
-     * Return the persisted installment options so the CDN React admin app can
-     * hydrate its "Taksitler" (Installments) tab on page load.
-     */
-    private function actionGetInstallmentOptions(array $params): array
-    {
-        $raw = (string) ($this->systemConfigService->get('SanalPosPro.config.installments') ?? '');
-        $options = json_decode($raw, true);
-
-        if (!is_array($options)) {
-            $options = [];
-        }
-
-        return $this->success('Installment options retrieved.', ['installmentOptions' => $options]);
-    }
-
-    /**
-     * Return the persisted module settings so the CDN React admin app can
-     * hydrate its "Ayarlar" (Settings) tab on page load.
-     */
-    private function actionGetModuleSettings(array $params): array
-    {
-        $settingsMap = [
-            'order_status'         => 'orderStatus',
-            'currency_convert'     => 'currencyConvert',
-            'showInstallmentsTabs' => 'showInstallmentsTabs',
-            'paymentPageTheme'     => 'paymentPageTheme',
-        ];
-
-        $settings = [];
-        foreach ($settingsMap as $key => $configKey) {
-            $value = $this->systemConfigService->get('SanalPosPro.config.' . $configKey);
-            $settings[$key] = $value !== null ? (string) $value : '';
-        }
-
-        return $this->success('Module settings retrieved.', ['moduleSettings' => $settings]);
     }
 
     private function actionGetMerchantInfo(array $params): array
@@ -306,15 +272,292 @@ class IapiController extends StorefrontController
         }
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
+    // ── Storefront payment actions ────────────────────────────────────────────
 
     /**
-     * Full key-bootstrap sequence mirroring Magento Workflows/Login.php:56-83:
-     *   1. GET  /app/list/my          → find installed app record for app_id 106
-     *   2. POST /app/install/106      → install if not present yet
-     *   3. GET  /app/getapikeys/{id}  → {id} is the installed record ID, not 106
-     *   4. Persist public_key + secret_key into system_config
+     * PayThor handles gateway selection on its own payment page.
+     * Return empty list → JS in iframe.html.twig skips gateway radio-button UI
+     * and calls createPayment directly.
      */
+    private function actionGetPaymentGateways(array $params): array
+    {
+        return $this->success('Gateway selection handled by PayThor payment page.', []);
+    }
+
+    /**
+     * Creates a PayThor payment session and returns the iframe/payment-page URL.
+     *
+     * Params from JS:
+     *   iapi_transactionId – Shopware order_transaction UUID
+     *   iapi_storeUrl      – window.location.origin
+     *   iapi_returnUrl     – Shopware finalize URL
+     */
+    private function actionCreatePayment(array $params): array
+    {
+        $transactionId = (string) ($params['iapi_transactionId'] ?? '');
+        $storeUrl      = rtrim((string) ($params['iapi_storeUrl'] ?? ''), '/');
+
+        if ($transactionId === '' || $storeUrl === '') {
+            return $this->error('transactionId and storeUrl are required.');
+        }
+
+        $pub = (string) ($this->systemConfigService->get(self::CONFIG_PUBLIC_KEY) ?? '');
+        $sec = (string) ($this->systemConfigService->get(self::CONFIG_SECRET_KEY) ?? '');
+
+        if ($pub === '' || $sec === '') {
+            return $this->error('API keys not configured.');
+        }
+
+        // ── Step 1: load Shopware order ──────────────────────────────────────
+        $amount      = 1.0;
+        $currency    = 'TRY';
+        $firstName   = 'Customer';
+        $lastName    = 'Customer';
+        $email       = 'customer@example.com';
+        $phone       = '0';
+        $cartItems   = [];
+        $addrData    = ['line_1' => '-', 'city' => 'Istanbul', 'state' => 'Istanbul', 'postal_code' => '34000', 'country' => 'TR'];
+        $orderNumber = substr($transactionId, 0, 20);
+
+        try {
+            $criteria = new Criteria([$transactionId]);
+            $criteria->addAssociation('order.currency');
+            $criteria->addAssociation('order.orderCustomer');
+            $criteria->addAssociation('order.lineItems');
+            $criteria->addAssociation('order.addresses.country');
+            $criteria->addAssociation('order.addresses.countryState');
+
+            $ctx      = $this->requestContext ?? Context::createDefaultContext();
+            $txEntity = $this->orderTransactionRepository->search($criteria, $ctx)->first();
+
+            if ($txEntity !== null) {
+                $order    = $txEntity->getOrder();
+                $amount   = (float) $order->getPrice()->getTotalPrice();
+                $currency = $order->getCurrency() ? $order->getCurrency()->getIsoCode() : 'TRY';
+
+                $customer    = $order->getOrderCustomer();
+                $firstName   = $customer ? ($customer->getFirstName() ?: 'Customer') : 'Customer';
+                $lastName    = $customer ? ($customer->getLastName()  ?: 'Customer') : 'Customer';
+                $email       = $customer ? ($customer->getEmail()     ?: 'customer@example.com') : 'customer@example.com';
+                $orderNumber = $order->getOrderNumber() ?: substr($transactionId, 0, 20);
+
+                foreach ($order->getLineItems() ?? [] as $item) {
+                    $cartItems[] = [
+                        'id'       => $item->getId(),
+                        'name'     => $item->getLabel(),
+                        'type'     => 'product',
+                        'price'    => (string) round((float) $item->getUnitPrice(), 2),
+                        'quantity' => (int) $item->getQuantity(),
+                    ];
+                }
+
+                $billingId = $order->getBillingAddressId();
+                foreach ($order->getAddresses() ?? [] as $addr) {
+                    if ($addr->getId() !== $billingId) continue;
+
+                    $stateVal = '';
+                    if ($addr->getCountryState()) {
+                        $stateVal = $addr->getCountryState()->getName() ?? '';
+                    }
+                    if ($stateVal === '') {
+                        $stateVal = $addr->getCity() ?? 'N/A';
+                    }
+
+                    $addrData = [
+                        'line_1'      => ($addr->getStreet() ?: '-'),
+                        'city'        => ($addr->getCity() ?: 'Istanbul'),
+                        'state'       => $stateVal,
+                        'postal_code' => ($addr->getZipcode() ?: '00000'),
+                        'country'     => $addr->getCountry() ? ($addr->getCountry()->getIso() ?? 'TR') : 'TR',
+                    ];
+                    $phone = $addr->getPhoneNumber() ?: '0';
+                    break;
+                }
+            } else {
+                $this->logger->warning('SanalPosPro: createPayment — transaction not found', ['id' => $transactionId]);
+            }
+        } catch (\Throwable $e) {
+            $this->logger->warning('SanalPosPro: createPayment — order load failed', ['error' => $e->getMessage()]);
+        }
+
+        if (empty($cartItems)) {
+            $cartItems = [['id' => '1', 'name' => 'Order', 'type' => 'product', 'price' => (string) round($amount, 2), 'quantity' => 1]];
+        }
+
+        // ── Step 2: POST /payment/create ─────────────────────────────────────
+        $shopwareReturnUrl = (string) ($params['iapi_returnUrl'] ?? '');
+        $callbackUrl = $storeUrl . '/sanalpospro/callback'
+            . '?txn=' . rawurlencode($transactionId)
+            . '&ret=' . rawurlencode($shopwareReturnUrl);
+
+        $personData = ['firstName' => $firstName, 'lastName' => $lastName, 'phone' => $phone, 'email' => $email, 'address' => $addrData];
+
+        $payload = [
+            'payment' => [
+                'amount'             => round($amount, 2) ?: 1.0,
+                'currency'           => $currency,
+                'buyerFee'           => 0,
+                'method'             => 'creditcard',
+                'merchant_reference' => $orderNumber,
+                'return_url'         => $callbackUrl,
+            ],
+            'payer' => [
+                'first_name' => $firstName,
+                'last_name'  => $lastName,
+                'email'      => $email,
+                'phone'      => $phone,
+                'ip'         => $this->requestIp,
+                'address'    => $addrData,
+            ],
+            'order' => [
+                'cart'     => $cartItems,
+                'shipping' => $personData,
+                'invoice'  => [
+                    'id'        => $orderNumber,
+                    'firstName' => $firstName,
+                    'lastName'  => $lastName,
+                    'price'     => number_format(round($amount, 2), 2, '.', ''),
+                    'quantity'  => 1,
+                ],
+            ],
+        ];
+
+        try {
+            [$hashTime, $hashRand, $hash] = $this->generateHash($pub, $sec);
+
+            $createResp = $this->httpClient->request('POST', self::PAYTHOR_API_BASE . '/payment/create', [
+                'headers' => [
+                    'Authorization'  => 'ApiKeys ' . $pub . ':' . $hash,
+                    'X-Timestamp'    => $hashTime,
+                    'X-Nonce'        => $hashRand,
+                    'ETC-PROGRAM-ID' => (string) self::PROGRAM_ID,
+                    'ETC-APP-ID'     => (string) $this->savedAppId(),
+                    'Content-Type'   => 'application/json',
+                ],
+                'json'    => $payload,
+                'timeout' => 15,
+            ]);
+
+            $rawBody  = $createResp->getContent(false);
+            $httpCode = $createResp->getStatusCode();
+            $this->logger->info('SanalPosPro: createPayment', ['http' => $httpCode, 'body' => substr($rawBody, 0, 600)]);
+
+            $createData = json_decode($rawBody, true);
+            if (!is_array($createData)) {
+                return $this->error('payment/create returned non-JSON (HTTP ' . $httpCode . '): ' . substr($rawBody, 0, 200));
+            }
+            if (($createData['status'] ?? '') !== 'success') {
+                $details = implode('; ', $createData['details'] ?? []);
+                return $this->error('payment/create failed: ' . ($createData['message'] ?? 'unknown') . ($details ? ' — ' . $details : ''));
+            }
+
+            // ── Step 3: GET /payment/getbytoken/{payment_token} ───────────────
+            $paymentToken = (string) ($createData['data']['payment_token'] ?? '');
+            if ($paymentToken === '') {
+                return $this->error('payment/create response missing payment_token.');
+            }
+
+            $iframeUrl = '';
+            try {
+                [$hashTime2, $hashRand2, $hash2] = $this->generateHash($pub, $sec);
+
+                $getByTokenResp = $this->httpClient->request(
+                    'GET',
+                    self::PAYTHOR_API_BASE . '/payment/getbytoken/' . rawurlencode($paymentToken),
+                    [
+                        'headers' => [
+                            'Authorization'  => 'ApiKeys ' . $pub . ':' . $hash2,
+                            'X-Timestamp'    => $hashTime2,
+                            'X-Nonce'        => $hashRand2,
+                            'ETC-PROGRAM-ID' => (string) self::PROGRAM_ID,
+                            'ETC-APP-ID'     => (string) $this->savedAppId(),
+                        ],
+                        'timeout' => 10,
+                    ]
+                );
+
+                $rawBody2  = $getByTokenResp->getContent(false);
+                $httpCode2 = $getByTokenResp->getStatusCode();
+                $tokenData = json_decode($rawBody2, true);
+                $this->logger->info('SanalPosPro: getByToken', ['http' => $httpCode2, 'body' => substr($rawBody2, 0, 500)]);
+
+                if (is_array($tokenData) && ($tokenData['status'] ?? '') === 'success') {
+                    $d = $tokenData['data'] ?? $tokenData;
+                    $iframeUrl = (string) ($d['payment_link'] ?? $d['iframe_url'] ?? $d['url'] ?? $d['embed_url'] ?? $d['iframe'] ?? '');
+                }
+            } catch (\Throwable $e) {
+                $this->logger->warning('SanalPosPro: getByToken failed, falling back to payment_link', ['error' => $e->getMessage()]);
+            }
+
+            if ($iframeUrl === '') {
+                $iframeUrl = (string) ($createData['data']['payment_link'] ?? '');
+            }
+            if ($iframeUrl === '') {
+                $iframeUrl = 'https://pay.paythor.com/payment/' . $paymentToken;
+            }
+
+            return $this->success('Payment session created.', [
+                'iframe_url'    => $iframeUrl,
+                'payment_token' => $paymentToken,
+            ]);
+
+        } catch (\Throwable $e) {
+            $this->logger->warning('SanalPosPro: createPayment failed', ['error' => $e->getMessage()]);
+            return $this->error('Payment creation failed: ' . $e->getMessage());
+        }
+    }
+
+    private function actionGetByToken(array $params): array
+    {
+        $token = (string) ($params['iapi_token'] ?? '');
+        if ($token === '') {
+            return $this->error('token is required.');
+        }
+
+        $pub = (string) ($this->systemConfigService->get(self::CONFIG_PUBLIC_KEY) ?? '');
+        $sec = (string) ($this->systemConfigService->get(self::CONFIG_SECRET_KEY) ?? '');
+
+        if ($pub === '' || $sec === '') {
+            return $this->error('API keys not configured.');
+        }
+
+        return $this->callGetByToken($token, $pub, $sec);
+    }
+
+    private function callGetByToken(string $token, string $pub, string $sec): array
+    {
+        try {
+            [$hashTime, $hashRand, $hash] = $this->generateHash($pub, $sec);
+
+            $response = $this->httpClient->request('GET', self::PAYTHOR_API_BASE . '/payment/getbytoken/' . $token, [
+                'headers' => [
+                    'Authorization'  => 'ApiKeys ' . $pub . ':' . $hash,
+                    'X-Timestamp'    => $hashTime,
+                    'X-Nonce'        => $hashRand,
+                    'ETC-PROGRAM-ID' => (string) self::PROGRAM_ID,
+                    'ETC-APP-ID'     => (string) $this->savedAppId(),
+                ],
+                'timeout' => 10,
+            ]);
+
+            $rawBody  = $response->getContent(false);
+            $httpCode = $response->getStatusCode();
+            $this->logger->info('SanalPosPro: getByToken', ['http' => $httpCode, 'body' => substr($rawBody, 0, 500)]);
+
+            $data = json_decode($rawBody, true);
+            if (!is_array($data)) {
+                return $this->error('getbytoken returned non-JSON (HTTP ' . $httpCode . ').');
+            }
+
+            return $data;
+        } catch (\Throwable $e) {
+            $this->logger->warning('SanalPosPro: getByToken failed', ['error' => $e->getMessage()]);
+            return $this->error('getByToken failed: ' . $e->getMessage());
+        }
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
     private function fetchAndSaveApiKeys(string $bearerToken): array
     {
         $bearerHeaders = [
@@ -325,12 +568,10 @@ class IapiController extends StorefrontController
         ];
 
         try {
-            // Step 1: find the merchant's installed app record
             [$myApp, $allApps] = $this->findMyApp($bearerHeaders);
 
             $this->logger->info('SanalPosPro: listMyApps full', ['apps' => $allApps]);
 
-            // Step 2: not installed yet — install it now
             if ($myApp === null) {
                 $this->logger->info('SanalPosPro: app not installed, installing now');
 
@@ -360,7 +601,6 @@ class IapiController extends StorefrontController
                     'message' => $installData['message'] ?? '',
                 ]);
 
-                // Re-fetch after install attempt
                 [$myApp, $allApps] = $this->findMyApp($bearerHeaders);
                 $this->logger->info('SanalPosPro: listMyApps after install', ['apps' => $allApps]);
             }
@@ -370,7 +610,6 @@ class IapiController extends StorefrontController
                 return $this->error('App not found after install attempt. Available apps: ' . json_encode($appSummary));
             }
 
-            // Step 3: get the API keys using the installed record's own ID
             $installedId = (int) ($myApp['id'] ?? 0);
             if ($installedId === 0) {
                 return $this->error('Installed app record has no id field. Record: ' . json_encode($myApp));
@@ -402,7 +641,6 @@ class IapiController extends StorefrontController
                 return $this->error('getApiKeys response missing public_key or secret_key.');
             }
 
-            // Step 4: persist
             $this->systemConfigService->set(self::CONFIG_PUBLIC_KEY, $publicKey);
             $this->systemConfigService->set(self::CONFIG_SECRET_KEY, $secretKey);
 
@@ -416,13 +654,7 @@ class IapiController extends StorefrontController
         }
     }
 
-    /**
-     * GET /app/list/my and return [matchedApp|null, allApps[]].
-     * Matches by app_id == SHOPWARE_APP_ID_DEFAULT, or falls back to any app
-     * whose name contains "shopware" or "swr".
-     *
-     * @return array{0: array|null, 1: array}
-     */
+    /** @return array{0: array|null, 1: array} */
     private function findMyApp(array $bearerHeaders): array
     {
         $response = $this->httpClient->request('GET', self::PAYTHOR_API_BASE . '/app/list/my', [
@@ -439,14 +671,12 @@ class IapiController extends StorefrontController
 
         $all = $data['data'];
 
-        // Primary match: exact app_id
         foreach ($all as $app) {
             if ((int) ($app['app_id'] ?? 0) === self::SHOPWARE_APP_ID_DEFAULT) {
                 return [$app, $all];
             }
         }
 
-        // Fallback: name contains "shopware" or "swr"
         foreach ($all as $app) {
             $name = strtolower((string) ($app['name'] ?? ''));
             if (str_contains($name, 'shopware') || str_contains($name, 'swr')) {

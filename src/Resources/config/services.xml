@@ -38,7 +38,7 @@
         <service id="SanalposproPayment\Service\SanalPosProPaymentHandler">
             <argument type="service" id="Shopware\Core\Checkout\Order\Aggregate\OrderTransaction\OrderTransactionStateHandler"/>
             <argument type="service" id="router"/>
-            <tag name="shopware.payment.method.async"/>
+            <tag name="shopware.payment.method"/>
         </service>
 
         <!-- ── Dev 1: Payment method installer ───────────────────────────── -->
@@ -56,11 +56,10 @@
         <!-- ── Dev 2: Storefront iframe + postMessage-bridge controller ──── -->
         <service id="SanalposproPayment\Storefront\Controller\SanalPosProController" public="true">
             <argument type="service" id="Shopware\Core\System\SystemConfig\SystemConfigService"/>
+            <argument type="service" id="http_client"/>
+            <argument type="service" id="logger"/>
             <call method="setContainer">
                 <argument type="service" id="service_container"/>
-            </call>
-            <call method="setTwig">
-                <argument type="service" id="twig"/>
             </call>
             <tag name="controller.service_arguments"/>
         </service>
@@ -78,6 +77,9 @@
         <!-- ── Dev 3: Admin config endpoint for CDN React app ──────────── -->
         <service id="SanalposproPayment\Core\Api\AdminConfigController" public="true">
             <argument type="service" id="Shopware\Core\System\SystemConfig\SystemConfigService"/>
+            <call method="setContainer">
+                <argument type="service" id="service_container"/>
+            </call>
             <tag name="controller.service_arguments"/>
         </service>
 
