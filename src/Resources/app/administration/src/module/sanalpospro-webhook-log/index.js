@@ -22,14 +22,4 @@ Shopware.Module.register('sanalpospro-webhook-log', {
             path: 'list',
         },
     },
-
-    navigation: [{
-        id: 'sanalpospro-webhook-log',
-        label: 'sanalpospro-webhook-log.general.title',
-        color: '#e74c3c',
-        path: 'sanalpospro.webhook.log.list',
-        icon: 'regular-list',
-        parent: 'sanalpospro-connect',
-        position: 20,
-    }],
 });
