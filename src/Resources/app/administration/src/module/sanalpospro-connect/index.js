@@ -28,7 +28,7 @@ Shopware.Module.register('sanalpospro-connect', {
         color: '#1abc9c',
         path: 'sanalpospro.connect.index',
         icon: 'regular-credit-card',
-        parent: 'sanalpospro-connect', // Assign to the folder above
+        parent: 'sanalpospro-connect',
         position: 10,
     }],
 });

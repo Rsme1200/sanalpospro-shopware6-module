@@ -37,14 +37,4 @@ Shopware.Module.register('sanalpospro-installment', {
             },
         },
     },
-
-    navigation: [{
-        id: 'sanalpospro-installment',
-        label: 'sanalpospro-installment.general.title',
-        color: '#1abc9c',
-        path: 'sanalpospro.installment.list',
-        icon: 'regular-credit-card',
-        parent: 'sanalpospro-connect',
-        position: 10,
-    }],
 });

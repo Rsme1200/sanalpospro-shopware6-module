@@ -11,12 +11,10 @@ Shopware.Component.register('sanalpospro-connect-index', {
     `,
 
     mounted() {
-        // Inject CSS overrides to eliminate double scroll (make it single-scroll like OpenCart)
         if (!document.getElementById('sanalpospro-scroll-fix')) {
             const style = document.createElement('style');
             style.id = 'sanalpospro-scroll-fix';
             style.textContent = `
-                /* --- SanalPosPro: Single-scroll fix (OpenCart-style) --- */
                 .sanalpospro-single-scroll .sw-page__content {
                     overflow: visible !important;
                     overflow-y: visible !important;
@@ -151,7 +149,6 @@ Shopware.Component.register('sanalpospro-connect-index', {
                 if (this.$refs.reactContainer) {
                     this.$refs.reactContainer.appendChild(div);
                 } else {
-                    // Fallback: attach to body if Vue ref is unavailable
                     div.style.cssText = 'position:fixed;top:130px;left:240px;right:0;bottom:0;z-index:10;background:#fff;overflow:auto;';
                     document.body.appendChild(div);
                 }
@@ -213,8 +210,6 @@ Shopware.Component.register('sanalpospro-connect-index', {
                     'paythor-merchant-app',
                 ];
 
-                // This key may contain an installed app record id from a previous
-                // account, which breaks app matching during re-login flows.
                 localStorage.removeItem('paythor-merchant-app');
 
                 if (localStorage.getItem(markerKey) !== forcedAppId) {

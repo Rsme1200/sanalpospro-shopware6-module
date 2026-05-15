@@ -1,4 +1,3 @@
-// <plugin root>/src/Resources/app/administration/src/module/swag-example/index.js
 import deDE from './snippet/de-DE';
 import enGB from './snippet/en-GB';
 

@@ -1,10 +1,3 @@
-// SanalPosPro Administration Modules
-
-// Fix: the CDN React app hardcodes app_id=105 (Magento) in its auth payload.
-// Intercept fetch calls going to paythor.com and replace auth_query.app_id with
-// the active Shopware app id before the request leaves the browser.
-// Scoped to paythor.com only so Shopware's own API calls are never touched.
-// Runs once at startup before any module or CDN script loads.
 (function patchPaythorAuthFetch() {
     const DEFAULT_APP_ID = 106;
     const MAX_SANE_APP_ID = 1000;
@@ -120,9 +113,6 @@
             return _nativeFetch(input, init);
         }
 
-        // Skip CDN requests — adding custom headers to static CDN files
-        // triggers CORS preflight which the CDN server does not support.
-        // Only patch headers for API endpoints.
         const isCdnUrl = url.includes('cdn.paythor.com');
         if (isCdnUrl) {
             return _nativeFetch(input, init);
@@ -131,14 +121,12 @@
         init = init ? Object.assign({}, init) : {};
         const appId = resolveActiveAppId();
 
-        // Patch etc-app-id header on every request to PayThor/SanalPosPro APIs.
         const rawHeaders = init.headers || {};
         const headers = rawHeaders instanceof Headers ? rawHeaders : new Headers(rawHeaders);
         headers.set('etc-app-id', String(appId));
         headers.set('ETC-APP-ID', String(appId));
         init.headers = headers;
 
-        // Patch app_id inside auth_query body.
         if (init.body && typeof init.body === 'string') {
             try {
                 const parsed = JSON.parse(init.body);
@@ -159,7 +147,6 @@
     };
 })();
 
-// Import all child modules directly
 import './module/sanalpospro-installment';
 import './module/sanalpospro-webhook-log';
 import './module/sanalpospro-connect';
