@@ -17,6 +17,9 @@ use Symfony\Component\Routing\Attribute\Route;
 #[Route(defaults: ['_routeScope' => ['api']])]
 class AdminConfigController extends AbstractController
 {
+    private const SHOPWARE_APP_ID_DEFAULT = 106;
+    private const MAX_SANE_APP_ID     = 1000;
+    private const CONFIG_APP_ID     = 'SanalPosPro.config.appId';
     private const CONFIG_PUBLIC_KEY = 'SanalPosPro.config.publicApiKey';
     private const CONFIG_SECRET_KEY = 'SanalPosPro.config.secretApiKey';
 
@@ -32,6 +35,11 @@ class AdminConfigController extends AbstractController
     )]
     public function adminConfig(): JsonResponse
     {
+        $appId = (int) ($this->systemConfigService->get(self::CONFIG_APP_ID) ?? 0);
+        if ($appId <= 0 || $appId > self::MAX_SANE_APP_ID) {
+            $appId = self::SHOPWARE_APP_ID_DEFAULT;
+        }
+
         // xfvv = hash derived from the stored API keys.
         // The CDN React app sends this value back to the storefront IAPI
         // bridge so we can verify the request came from an authenticated
@@ -70,6 +78,7 @@ class AdminConfigController extends AbstractController
 
         return new JsonResponse([
             'xfvv'            => $xfvv,
+            'app_id'          => $appId,
             'target_url'      => '/sanalpospro/iapi/index',
             'module_settings' => $settings,
         ]);

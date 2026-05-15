@@ -18,13 +18,16 @@ class IapiController extends StorefrontController
 {
     private const PAYTHOR_API_BASE        = 'https://live-api.sanalpospro.com';
     private const SHOPWARE_APP_ID_DEFAULT = 106;
+    private const MAX_SANE_APP_ID         = 1000;
     private const PROGRAM_ID             = 1;
     private const CONFIG_APP_ID          = 'SanalPosPro.config.appId';
+    private const CONFIG_ACCESS_TOKEN    = 'SanalPosPro.config.accessToken';
     private const CONFIG_PUBLIC_KEY      = 'SanalPosPro.config.publicApiKey';
     private const CONFIG_SECRET_KEY      = 'SanalPosPro.config.secretApiKey';
 
     private ?Context $requestContext = null;
     private string $requestIp        = '127.0.0.1';
+    private string $requestHost      = '';
 
     public function __construct(
         private readonly SystemConfigService $systemConfigService,
@@ -54,10 +57,11 @@ class IapiController extends StorefrontController
 
         $this->requestContext = $context;
         $this->requestIp     = $request->getClientIp() ?? '127.0.0.1';
+        $this->requestHost   = strtolower((string) $request->getHost());
 
         $action     = (string) $request->request->get('iapi_action', '');
-        $xfvv       = (string) $request->request->get('iapi_xfvv', '');
-        $iapiParams = json_decode((string) $request->request->get('iapi_params', '{}'), true) ?? [];
+        $rawParams  = (string) $request->request->get('iapi_params', '{}');
+        $iapiParams = $this->decodeIapiParams($rawParams);
 
         if ($action === '') {
             return new JsonResponse($this->error('Action not specified.'), 200, $corsHeaders);
@@ -90,22 +94,40 @@ class IapiController extends StorefrontController
 
     private function actionCheckApiKeys(array $params): array
     {
-        $token = (string) ($params['iapi_accessToken'] ?? '');
+        $token = $this->readAccessTokenFromParams($params);
         if ($token === '') {
-            return $this->error('No access token provided.');
+            return array_merge($this->error('No access token provided.'), ['data' => []]);
         }
 
-        $pub = (string) ($this->systemConfigService->get(self::CONFIG_PUBLIC_KEY) ?? '');
-        $sec = (string) ($this->systemConfigService->get(self::CONFIG_SECRET_KEY) ?? '');
+        $previousToken   = $this->getSavedAccessToken();
+        $isAccountSwitch = $previousToken !== '' && $previousToken !== $token;
 
-        // No keys yet (fresh install) → fetch them now using the Bearer token.
+        if ($isAccountSwitch) {
+            // Guard against stale app ids (for example installed app row ids)
+            // left from another account before re-login.
+            $this->systemConfigService->set(self::CONFIG_APP_ID, self::SHOPWARE_APP_ID_DEFAULT);
+        }
+
+        // Keep latest access token so we can self-heal later hash/key errors.
+        $this->systemConfigService->set(self::CONFIG_ACCESS_TOKEN, $token);
+
+        $pub = trim((string) ($this->systemConfigService->get(self::CONFIG_PUBLIC_KEY) ?? ''));
+        $sec = trim((string) ($this->systemConfigService->get(self::CONFIG_SECRET_KEY) ?? ''));
+
+        // During account switch, keep Woo flow: frontend should continue with
+        // all/my/getApiKeys/saveApiKeys instead of backend auto-sync here.
+        // For normal flow, still auto-fetch when keys are missing.
         if ($pub === '' || $sec === '') {
+            if ($isAccountSwitch) {
+                return $this->error('Merchant ID mismatch!');
+            }
+
             $fetchResult = $this->fetchAndSaveApiKeys($token);
             if ($fetchResult['status'] !== 'success') {
                 return $fetchResult;
             }
-            $pub = (string) ($this->systemConfigService->get(self::CONFIG_PUBLIC_KEY) ?? '');
-            $sec = (string) ($this->systemConfigService->get(self::CONFIG_SECRET_KEY) ?? '');
+            $pub = trim((string) ($this->systemConfigService->get(self::CONFIG_PUBLIC_KEY) ?? ''));
+            $sec = trim((string) ($this->systemConfigService->get(self::CONFIG_SECRET_KEY) ?? ''));
         }
 
         if ($pub === '' || $sec === '') {
@@ -114,24 +136,42 @@ class IapiController extends StorefrontController
 
         $data = $this->callCheckAccessToken($token, $pub, $sec);
 
-        // "Merchant ID mismatch" means the stored keys belong to a DIFFERENT merchant.
-        // Clear the stale keys, re-fetch for the new merchant, retry.
+        // On account switch we intentionally do not auto-heal mismatch/hash.
+        // Frontend expects an error first, then performs all/my/getApiKeys/save.
+        if (($data['status'] ?? '') !== 'success' && $isAccountSwitch) {
+            if (
+                $this->isTransportErrorResponse($data)
+                || $this->isHashErrorResponse($data)
+                || $this->isMerchantMismatchResponse($data)
+            ) {
+                return $this->error('Merchant ID mismatch!');
+            }
+
+            return $data;
+        }
+
+        // If keys are stale (mismatch), pair is broken (hash error), or the signed
+        // check fails at transport level (for example transient DNS failure with old
+        // key state), refresh from access token and retry once.
         if (
             ($data['status'] ?? '') !== 'success'
-            && str_contains(strtolower((string) ($data['message'] ?? '')), 'mismatch')
+            && (
+                $this->isMerchantMismatchResponse($data)
+                || $this->isHashErrorResponse($data)
+                || $this->isTransportErrorResponse($data)
+            )
         ) {
-            $this->logger->info('SanalPosPro: merchant mismatch — clearing stale keys and re-fetching');
-            $this->systemConfigService->delete(self::CONFIG_PUBLIC_KEY);
-            $this->systemConfigService->delete(self::CONFIG_SECRET_KEY);
-            $this->systemConfigService->delete(self::CONFIG_APP_ID);
+            $this->logger->info('SanalPosPro: checkApiKeys re-sync — re-fetching keys', [
+                'message' => (string) ($data['message'] ?? ''),
+            ]);
 
             $fetchResult = $this->fetchAndSaveApiKeys($token);
             if ($fetchResult['status'] !== 'success') {
                 return $fetchResult;
             }
 
-            $pub  = (string) ($this->systemConfigService->get(self::CONFIG_PUBLIC_KEY) ?? '');
-            $sec  = (string) ($this->systemConfigService->get(self::CONFIG_SECRET_KEY) ?? '');
+            $pub  = trim((string) ($this->systemConfigService->get(self::CONFIG_PUBLIC_KEY) ?? ''));
+            $sec  = trim((string) ($this->systemConfigService->get(self::CONFIG_SECRET_KEY) ?? ''));
             $data = $this->callCheckAccessToken($token, $pub, $sec);
         }
 
@@ -146,46 +186,278 @@ class IapiController extends StorefrontController
 
     private function callCheckAccessToken(string $token, string $pub, string $sec): array
     {
-        try {
-            [$hashTime, $hashRand, $hash] = $this->generateHash($pub, $sec);
+        return $this->callSignedEndpoint(
+            method: 'POST',
+            endpoint: '/check/accesstoken',
+            pub: $pub,
+            sec: $sec,
+            payload: ['accesstoken' => $token],
+            timeout: 10,
+            logContext: 'checkApiKeys'
+        );
+    }
 
-            $response = $this->httpClient->request('POST', self::PAYTHOR_API_BASE . '/check/accesstoken', [
-                'headers' => [
-                    'Authorization'  => 'ApiKeys ' . $pub . ':' . $hash,
-                    'X-Timestamp'    => $hashTime,
-                    'X-Nonce'        => $hashRand,
-                    'ETC-PROGRAM-ID' => (string) self::PROGRAM_ID,
-                    'ETC-APP-ID'     => (string) $this->savedAppId(),
-                    'Content-Type'   => 'application/json',
-                ],
-                'json'    => ['accesstoken' => $token],
+    private function actionFetchApiKeys(array $params): array
+    {
+        $token = $this->readAccessTokenFromParams($params);
+        if ($token === '') {
+            return array_merge($this->error('No access token provided.'), ['data' => []]);
+        }
+
+        $this->systemConfigService->set(self::CONFIG_ACCESS_TOKEN, $token);
+
+        return $this->fetchAndSaveApiKeys($token);
+    }
+
+    // Woo-compatible aliases used by CDN dashboard flow after checkApiKeys mismatch.
+    private function actionAll(array $params): array
+    {
+        $token = $this->readAccessTokenFromParams($params);
+        if ($token === '') {
+            $token = $this->getSavedAccessToken();
+        }
+
+        $appIdHint = $this->readAppIdFromParams($params);
+
+        if ($token !== '') {
+            $this->systemConfigService->set(self::CONFIG_ACCESS_TOKEN, $token);
+            $headers = $this->buildBearerHeaders($token, $appIdHint > 0 ? $appIdHint : null);
+
+            try {
+                $response = $this->httpClient->request('GET', self::PAYTHOR_API_BASE . '/app/list/all', [
+                    'headers' => $headers,
+                    'timeout' => 10,
+                ]);
+
+                $rawBody  = $response->getContent(false);
+                $httpCode = $response->getStatusCode();
+                $this->logger->info('SanalPosPro: listAllApps direct', [
+                    'http' => $httpCode,
+                    'body' => substr($rawBody, 0, 500),
+                ]);
+
+                $data = json_decode($rawBody, true);
+                if (is_array($data)) {
+                    if (!is_array($data['data'] ?? null)) {
+                        $data['data'] = [];
+                    }
+
+                    $data['data'] = $this->normalizeCatalogApps($data['data']);
+
+                    if (($data['status'] ?? '') === 'success') {
+                        return $data;
+                    }
+
+                    $message = strtolower((string) ($data['message'] ?? ''));
+                    if ($message !== '' && !str_contains($message, 'not authorized')) {
+                        return $data;
+                    }
+                }
+            } catch (\Throwable $e) {
+                $this->logger->warning('SanalPosPro: listAllApps direct failed', ['error' => $e->getMessage()]);
+            }
+        }
+
+        $pub = trim((string) ($this->systemConfigService->get(self::CONFIG_PUBLIC_KEY) ?? ''));
+        $sec = trim((string) ($this->systemConfigService->get(self::CONFIG_SECRET_KEY) ?? ''));
+
+        if ($pub === '' || $sec === '') {
+            if (!$this->refreshApiKeysFromSavedAccessToken()) {
+                return array_merge($this->error('API keys not configured.'), ['data' => []]);
+            }
+
+            $pub = trim((string) ($this->systemConfigService->get(self::CONFIG_PUBLIC_KEY) ?? ''));
+            $sec = trim((string) ($this->systemConfigService->get(self::CONFIG_SECRET_KEY) ?? ''));
+            if ($pub === '' || $sec === '') {
+                return array_merge($this->error('API keys not configured.'), ['data' => []]);
+            }
+        }
+
+        $data = $this->callSignedEndpoint(
+            method: 'GET',
+            endpoint: '/app/list/all',
+            pub: $pub,
+            sec: $sec,
+            payload: [],
+            timeout: 10,
+            logContext: 'listAllApps'
+        );
+
+        if (($data['status'] ?? '') === 'success') {
+            return $data;
+        }
+
+        if ($this->isHashErrorResponse($data) && $this->refreshApiKeysFromSavedAccessToken()) {
+            $pub = trim((string) ($this->systemConfigService->get(self::CONFIG_PUBLIC_KEY) ?? ''));
+            $sec = trim((string) ($this->systemConfigService->get(self::CONFIG_SECRET_KEY) ?? ''));
+            if ($pub !== '' && $sec !== '') {
+                $data = $this->callSignedEndpoint(
+                    method: 'GET',
+                    endpoint: '/app/list/all',
+                    pub: $pub,
+                    sec: $sec,
+                    payload: [],
+                    timeout: 10,
+                    logContext: 'listAllAppsRetry'
+                );
+            }
+        }
+
+        if (!is_array($data['data'] ?? null)) {
+            $data['data'] = [];
+        }
+
+        $data['data'] = $this->normalizeCatalogApps($data['data']);
+
+        return $data;
+    }
+
+    private function actionMy(array $params): array
+    {
+        $token = $this->readAccessTokenFromParams($params);
+        if ($token === '') {
+            $token = $this->getSavedAccessToken();
+        }
+
+        if ($token === '') {
+            return $this->error('No access token provided.');
+        }
+
+        $this->systemConfigService->set(self::CONFIG_ACCESS_TOKEN, $token);
+
+        $appIdHint = $this->readAppIdFromParams($params);
+        $headers   = $this->buildBearerHeaders($token, $appIdHint > 0 ? $appIdHint : null);
+
+        try {
+            $response = $this->httpClient->request('GET', self::PAYTHOR_API_BASE . '/app/list/my', [
+                'headers' => $headers,
                 'timeout' => 10,
             ]);
 
             $rawBody  = $response->getContent(false);
             $httpCode = $response->getStatusCode();
-            $this->logger->info('SanalPosPro: checkApiKeys raw', ['http' => $httpCode, 'body' => substr($rawBody, 0, 500)]);
+            $this->logger->info('SanalPosPro: listMyApps direct', [
+                'http' => $httpCode,
+                'body' => substr($rawBody, 0, 500),
+            ]);
 
             $data = json_decode($rawBody, true);
-            if (json_last_error() !== JSON_ERROR_NONE || !is_array($data)) {
-                return $this->error('API returned non-JSON (HTTP ' . $httpCode . '): ' . substr($rawBody, 0, 300));
+            if (!is_array($data)) {
+                return array_merge(
+                    $this->error('listMyApps returned non-JSON (HTTP ' . $httpCode . '): ' . substr($rawBody, 0, 300)),
+                    ['data' => []]
+                );
+            }
+
+            $rows = $data['data'] ?? null;
+            if (($data['status'] ?? '') === 'success' && is_array($rows) && count($rows) === 0) {
+                $this->logger->info('SanalPosPro: listMyApps returned empty list, forcing install retry');
+
+                $this->installShopwareApp($headers);
+
+                $retryResponse = $this->httpClient->request('GET', self::PAYTHOR_API_BASE . '/app/list/my', [
+                    'headers' => $headers,
+                    'timeout' => 10,
+                ]);
+
+                $retryBody = $retryResponse->getContent(false);
+                $retryData = json_decode($retryBody, true);
+                if (is_array($retryData)) {
+                    if (!is_array($retryData['data'] ?? null)) {
+                        $retryData['data'] = [];
+                    }
+
+                    return $retryData;
+                }
+            }
+
+            if (!is_array($data['data'] ?? null)) {
+                $data['data'] = [];
             }
 
             return $data;
         } catch (\Throwable $e) {
-            $this->logger->warning('SanalPosPro: checkApiKeys failed', ['error' => $e->getMessage()]);
-            return $this->error('Request failed: ' . $e->getMessage());
+            $this->logger->warning('SanalPosPro: listMyApps direct failed', ['error' => $e->getMessage()]);
+            return array_merge($this->error('listMyApps request failed: ' . $e->getMessage()), ['data' => []]);
         }
     }
 
-    private function actionFetchApiKeys(array $params): array
+    private function actionGetApiKeys(array $params): array
     {
-        $token = (string) ($params['iapi_accessToken'] ?? '');
+        $token = $this->readAccessTokenFromParams($params);
+        if ($token === '') {
+            $token = $this->getSavedAccessToken();
+        }
+
         if ($token === '') {
             return $this->error('No access token provided.');
         }
 
-        return $this->fetchAndSaveApiKeys($token);
+        $this->systemConfigService->set(self::CONFIG_ACCESS_TOKEN, $token);
+
+        $appIdHint = $this->readAppIdFromParams($params);
+        $headers   = $this->buildBearerHeaders($token, $appIdHint > 0 ? $appIdHint : null);
+
+        $installedId = (int) (
+            $params['iapi_installedId']
+            ?? $params['installed_id']
+            ?? $params['iapi_id']
+            ?? $params['id']
+            ?? 0
+        );
+
+        if ($installedId <= 0 && $appIdHint > 0) {
+            [$myApp, $allApps] = $this->findMyApp($headers);
+
+            if ($myApp !== null && (int) ($myApp['app_id'] ?? 0) === $appIdHint) {
+                $installedId = (int) ($myApp['id'] ?? 0);
+            }
+
+            if ($installedId <= 0) {
+                foreach ($allApps as $app) {
+                    if (!is_array($app)) {
+                        continue;
+                    }
+
+                    if ((int) ($app['app_id'] ?? 0) === $appIdHint) {
+                        $installedId = (int) ($app['id'] ?? 0);
+                        break;
+                    }
+                }
+            }
+        }
+
+        if ($installedId <= 0) {
+            [$myApp] = $this->findMyApp($headers);
+            $installedId = (int) ($myApp['id'] ?? 0);
+        }
+
+        if ($installedId <= 0) {
+            try {
+                $this->logger->info('SanalPosPro: getApiKeys could not resolve installed app id, forcing install retry');
+                $this->installShopwareApp($headers);
+
+                [$myApp] = $this->findMyApp($headers);
+                $installedId = (int) ($myApp['id'] ?? 0);
+            } catch (\Throwable $e) {
+                $this->logger->warning('SanalPosPro: forced install before getApiKeys failed', ['error' => $e->getMessage()]);
+            }
+        }
+
+        if ($installedId <= 0) {
+            return $this->error('No installed app id resolved for getApiKeys.');
+        }
+
+        $keysResult = $this->fetchApiKeysByInstalledId($installedId, $headers);
+        if (($keysResult['status'] ?? '') !== 'success') {
+            return $keysResult;
+        }
+
+        return $this->success('API keys fetched.', [
+            'installed_id' => $installedId,
+            'public_key'   => (string) ($keysResult['public_key'] ?? ''),
+            'secret_key'   => (string) ($keysResult['secret_key'] ?? ''),
+        ]);
     }
 
     private function actionSaveApiKeys(array $params): array
@@ -243,33 +515,36 @@ class IapiController extends StorefrontController
 
     private function actionGetMerchantInfo(array $params): array
     {
-        $pub = (string) ($this->systemConfigService->get(self::CONFIG_PUBLIC_KEY) ?? '');
-        $sec = (string) ($this->systemConfigService->get(self::CONFIG_SECRET_KEY) ?? '');
+        $pub = trim((string) ($this->systemConfigService->get(self::CONFIG_PUBLIC_KEY) ?? ''));
+        $sec = trim((string) ($this->systemConfigService->get(self::CONFIG_SECRET_KEY) ?? ''));
 
         if ($pub === '' || $sec === '') {
-            return $this->error('API keys not configured.');
+            if (!$this->refreshApiKeysFromSavedAccessToken()) {
+                return $this->error('API keys not configured.');
+            }
+
+            $pub = trim((string) ($this->systemConfigService->get(self::CONFIG_PUBLIC_KEY) ?? ''));
+            $sec = trim((string) ($this->systemConfigService->get(self::CONFIG_SECRET_KEY) ?? ''));
+            if ($pub === '' || $sec === '') {
+                return $this->error('API keys not configured.');
+            }
         }
 
-        try {
-            [$hashTime, $hashRand, $hash] = $this->generateHash($pub, $sec);
-
-            $response = $this->httpClient->request('POST', self::PAYTHOR_API_BASE . '/merchant/info', [
-                'headers' => [
-                    'Authorization'  => 'ApiKeys ' . $pub . ':' . $hash,
-                    'X-Timestamp'    => $hashTime,
-                    'X-Nonce'        => $hashRand,
-                    'ETC-PROGRAM-ID' => (string) self::PROGRAM_ID,
-                    'ETC-APP-ID'     => (string) $this->savedAppId(),
-                    'Content-Type'   => 'application/json',
-                ],
-                'json'    => [],
-                'timeout' => 10,
-            ]);
-
-            return $response->toArray(false);
-        } catch (\Throwable $e) {
-            return $this->error('Merchant info request failed: ' . $e->getMessage());
+        $data = $this->callMerchantInfo($pub, $sec);
+        if (($data['status'] ?? '') === 'success') {
+            return $data;
         }
+
+        // Self-heal on hash error by refreshing keys from the last access token.
+        if ($this->isHashErrorResponse($data) && $this->refreshApiKeysFromSavedAccessToken()) {
+            $pub = trim((string) ($this->systemConfigService->get(self::CONFIG_PUBLIC_KEY) ?? ''));
+            $sec = trim((string) ($this->systemConfigService->get(self::CONFIG_SECRET_KEY) ?? ''));
+            if ($pub !== '' && $sec !== '') {
+                return $this->callMerchantInfo($pub, $sec);
+            }
+        }
+
+        return $data;
     }
 
     // ── Storefront payment actions ────────────────────────────────────────────
@@ -569,84 +844,61 @@ class IapiController extends StorefrontController
 
         try {
             [$myApp, $allApps] = $this->findMyApp($bearerHeaders);
-
             $this->logger->info('SanalPosPro: listMyApps full', ['apps' => $allApps]);
 
             if ($myApp === null) {
                 $this->logger->info('SanalPosPro: app not installed, installing now');
-
-                $installRaw = $this->httpClient->request(
-                    'POST',
-                    self::PAYTHOR_API_BASE . '/app/install/' . self::SHOPWARE_APP_ID_DEFAULT,
-                    [
-                        'headers' => $bearerHeaders,
-                        'json'    => [
-                            'install' => [
-                                'app_stage'  => 'production',
-                                'app_id'     => self::SHOPWARE_APP_ID_DEFAULT,
-                                'program_id' => self::PROGRAM_ID,
-                                'store_url'  => 'http://localhost',
-                            ],
-                        ],
-                        'timeout' => 10,
-                    ]
-                );
-
-                $installBody = $installRaw->getContent(false);
-                $installData = json_decode($installBody, true) ?? [];
-                $this->logger->info('SanalPosPro: install response', [
-                    'http'    => $installRaw->getStatusCode(),
-                    'body'    => substr($installBody, 0, 500),
-                    'status'  => $installData['status'] ?? 'unknown',
-                    'message' => $installData['message'] ?? '',
-                ]);
+                $this->installShopwareApp($bearerHeaders);
 
                 [$myApp, $allApps] = $this->findMyApp($bearerHeaders);
                 $this->logger->info('SanalPosPro: listMyApps after install', ['apps' => $allApps]);
             }
 
+            $attemptedIds = [];
+            $attemptErrors = [];
+
+            $success = $this->trySaveApiKeysFromAppCandidates(
+                preferredApp: $myApp,
+                allApps: $allApps,
+                bearerHeaders: $bearerHeaders,
+                bearerToken: $bearerToken,
+                attemptedIds: $attemptedIds,
+                attemptErrors: $attemptErrors,
+            );
+
+            if ($success !== null) {
+                return $success;
+            }
+
+            // Some accounts have stale app rows with empty keys; force install and retry once.
+            $this->logger->info('SanalPosPro: no usable keys from current app list, forcing install retry');
+            $this->installShopwareApp($bearerHeaders);
+
+            [$myApp, $allApps] = $this->findMyApp($bearerHeaders);
+            $this->logger->info('SanalPosPro: listMyApps after forced install', ['apps' => $allApps]);
+
+            $success = $this->trySaveApiKeysFromAppCandidates(
+                preferredApp: $myApp,
+                allApps: $allApps,
+                bearerHeaders: $bearerHeaders,
+                bearerToken: $bearerToken,
+                attemptedIds: $attemptedIds,
+                attemptErrors: $attemptErrors,
+            );
+
+            if ($success !== null) {
+                return $success;
+            }
+
             if ($myApp === null) {
-                $appSummary = array_map(fn($a) => ['id' => $a['id'] ?? '?', 'app_id' => $a['app_id'] ?? '?', 'name' => $a['name'] ?? '?'], $allApps);
+                $appSummary = array_map(
+                    fn($a) => ['id' => $a['id'] ?? '?', 'app_id' => $a['app_id'] ?? '?', 'name' => $a['name'] ?? '?'],
+                    $allApps
+                );
                 return $this->error('App not found after install attempt. Available apps: ' . json_encode($appSummary));
             }
 
-            $installedId = (int) ($myApp['id'] ?? 0);
-            if ($installedId === 0) {
-                return $this->error('Installed app record has no id field. Record: ' . json_encode($myApp));
-            }
-
-            $keysResp = $this->httpClient->request(
-                'GET',
-                self::PAYTHOR_API_BASE . '/app/getapikeys/' . $installedId,
-                ['headers' => $bearerHeaders, 'timeout' => 10]
-            );
-
-            $rawBody  = $keysResp->getContent(false);
-            $httpCode = $keysResp->getStatusCode();
-            $this->logger->info('SanalPosPro: getApiKeys raw', ['http' => $httpCode, 'body' => substr($rawBody, 0, 500)]);
-
-            $data = json_decode($rawBody, true);
-            if (json_last_error() !== JSON_ERROR_NONE || !is_array($data)) {
-                return $this->error('getApiKeys returned non-JSON (HTTP ' . $httpCode . '): ' . substr($rawBody, 0, 300));
-            }
-
-            if (($data['status'] ?? '') !== 'success') {
-                return $this->error('getApiKeys failed: ' . ($data['message'] ?? 'unknown error'));
-            }
-
-            $publicKey = (string) ($data['data']['public_key'] ?? '');
-            $secretKey = (string) ($data['data']['secret_key'] ?? '');
-
-            if ($publicKey === '' || $secretKey === '') {
-                return $this->error('getApiKeys response missing public_key or secret_key.');
-            }
-
-            $this->systemConfigService->set(self::CONFIG_PUBLIC_KEY, $publicKey);
-            $this->systemConfigService->set(self::CONFIG_SECRET_KEY, $secretKey);
-
-            $this->logger->info('SanalPosPro: API keys auto-fetched and saved', ['installed_id' => $installedId]);
-
-            return $this->success('API keys retrieved and saved automatically.', ['public_key' => $publicKey]);
+            return $this->error('No usable API keys found for installed apps. Attempts: ' . json_encode($attemptErrors));
 
         } catch (\Throwable $e) {
             $this->logger->warning('SanalPosPro: fetchAndSaveApiKeys failed', ['error' => $e->getMessage()]);
@@ -670,33 +922,227 @@ class IapiController extends StorefrontController
         }
 
         $all = $data['data'];
+        $candidates = $this->buildApiKeyCandidates(null, $all);
+        return [$candidates[0] ?? null, $all];
+    }
 
-        foreach ($all as $app) {
-            if ((int) ($app['app_id'] ?? 0) === self::SHOPWARE_APP_ID_DEFAULT) {
-                return [$app, $all];
+    private function installShopwareApp(array $bearerHeaders): void
+    {
+        $installRaw = $this->httpClient->request(
+            'POST',
+            self::PAYTHOR_API_BASE . '/app/install/' . self::SHOPWARE_APP_ID_DEFAULT,
+            [
+                'headers' => $bearerHeaders,
+                'json'    => [
+                    'install' => [
+                        'app_stage'  => 'production',
+                        'app_id'     => self::SHOPWARE_APP_ID_DEFAULT,
+                        'program_id' => self::PROGRAM_ID,
+                        'store_url'  => 'http://localhost',
+                    ],
+                ],
+                'timeout' => 10,
+            ]
+        );
+
+        $installBody = $installRaw->getContent(false);
+        $installData = json_decode($installBody, true) ?? [];
+        $this->logger->info('SanalPosPro: install response', [
+            'http'    => $installRaw->getStatusCode(),
+            'body'    => substr($installBody, 0, 500),
+            'status'  => $installData['status'] ?? 'unknown',
+            'message' => $installData['message'] ?? '',
+        ]);
+    }
+
+    private function trySaveApiKeysFromAppCandidates(
+        ?array $preferredApp,
+        array $allApps,
+        array $bearerHeaders,
+        string $bearerToken,
+        array &$attemptedIds,
+        array &$attemptErrors
+    ): ?array {
+        $candidates = $this->buildApiKeyCandidates($preferredApp, $allApps);
+
+        foreach ($candidates as $app) {
+            $installedId = (int) ($app['id'] ?? 0);
+            if ($installedId === 0 || in_array($installedId, $attemptedIds, true)) {
+                continue;
+            }
+
+            $attemptedIds[] = $installedId;
+            $keysResult     = $this->fetchApiKeysByInstalledId($installedId, $bearerHeaders);
+
+            if (($keysResult['status'] ?? '') !== 'success') {
+                $attemptErrors[] = [
+                    'installed_id' => $installedId,
+                    'message'      => (string) ($keysResult['message'] ?? 'unknown error'),
+                ];
+                continue;
+            }
+
+            $publicKey = (string) ($keysResult['public_key'] ?? '');
+            $secretKey = (string) ($keysResult['secret_key'] ?? '');
+
+            $this->systemConfigService->set(self::CONFIG_PUBLIC_KEY, trim($publicKey));
+            $this->systemConfigService->set(self::CONFIG_SECRET_KEY, trim($secretKey));
+            $this->systemConfigService->set(self::CONFIG_ACCESS_TOKEN, $bearerToken);
+
+            $this->logger->info('SanalPosPro: API keys auto-fetched and saved', ['installed_id' => $installedId]);
+
+            return $this->success('API keys retrieved and saved automatically.', ['public_key' => $publicKey]);
+        }
+
+        return null;
+    }
+
+    private function fetchApiKeysByInstalledId(int $installedId, array $bearerHeaders): array
+    {
+        try {
+            $keysResp = $this->httpClient->request(
+                'GET',
+                self::PAYTHOR_API_BASE . '/app/getapikeys/' . $installedId,
+                ['headers' => $bearerHeaders, 'timeout' => 10]
+            );
+
+            $rawBody  = $keysResp->getContent(false);
+            $httpCode = $keysResp->getStatusCode();
+            $this->logger->info('SanalPosPro: getApiKeys raw', [
+                'installed_id' => $installedId,
+                'http'         => $httpCode,
+                'body'         => substr($rawBody, 0, 500),
+            ]);
+
+            $data = json_decode($rawBody, true);
+            if (json_last_error() !== JSON_ERROR_NONE || !is_array($data)) {
+                return $this->error('getApiKeys returned non-JSON (HTTP ' . $httpCode . '): ' . substr($rawBody, 0, 300));
+            }
+
+            if (($data['status'] ?? '') !== 'success') {
+                return $this->error('getApiKeys failed: ' . ($data['message'] ?? 'unknown error'));
+            }
+
+            $publicRaw = $data['data']['public_key'] ?? $data['data']['publicKey'] ?? $data['data']['publicApiKey'] ?? '';
+            $secretRaw = $data['data']['secret_key'] ?? $data['data']['secretKey'] ?? $data['data']['secretApiKey'] ?? '';
+
+            $publicKey = is_string($publicRaw) ? trim($publicRaw) : '';
+            $secretKey = is_string($secretRaw) ? trim($secretRaw) : '';
+
+            if ($publicKey === '' || $secretKey === '') {
+                return $this->error('getApiKeys response missing public_key or secret_key for installed app id ' . $installedId . '.');
+            }
+
+            return [
+                'status'     => 'success',
+                'public_key' => $publicKey,
+                'secret_key' => $secretKey,
+            ];
+        } catch (\Throwable $e) {
+            $this->logger->warning('SanalPosPro: getApiKeys failed', [
+                'installed_id' => $installedId,
+                'error'        => $e->getMessage(),
+            ]);
+            return $this->error('getApiKeys request failed: ' . $e->getMessage());
+        }
+    }
+
+    private function buildApiKeyCandidates(?array $preferredApp, array $allApps): array
+    {
+        $candidates = [];
+
+        if (is_array($preferredApp) && $preferredApp !== []) {
+            $candidates[] = $preferredApp;
+        }
+
+        foreach ($allApps as $app) {
+            if (!is_array($app)) {
+                continue;
+            }
+
+            $appId = (int) ($app['app_id'] ?? 0);
+            $name  = strtolower((string) ($app['name'] ?? ''));
+
+            if ($appId === self::SHOPWARE_APP_ID_DEFAULT || str_contains($name, 'shopware') || str_contains($name, 'swr')) {
+                $candidates[] = $app;
             }
         }
 
-        foreach ($all as $app) {
-            $name = strtolower((string) ($app['name'] ?? ''));
-            if (str_contains($name, 'shopware') || str_contains($name, 'swr')) {
-                return [$app, $all];
+        $deduped = [];
+        $seen    = [];
+        foreach ($candidates as $app) {
+            $id  = (int) ($app['id'] ?? 0);
+            $key = $id > 0 ? 'id:' . $id : md5(json_encode($app) ?: '');
+            if (isset($seen[$key])) {
+                continue;
             }
+
+            $seen[$key] = true;
+            $deduped[]  = $app;
         }
 
-        return [null, $all];
+        usort($deduped, function (array $a, array $b): int {
+            $scoreA = $this->appCandidateScore($a);
+            $scoreB = $this->appCandidateScore($b);
+
+            if ($scoreA === $scoreB) {
+                return (int) ($b['id'] ?? 0) <=> (int) ($a['id'] ?? 0);
+            }
+
+            return $scoreB <=> $scoreA;
+        });
+
+        return $deduped;
+    }
+
+    private function appCandidateScore(array $app): int
+    {
+        $score = 0;
+
+        if ((int) ($app['app_id'] ?? 0) === self::SHOPWARE_APP_ID_DEFAULT) {
+            $score += 100;
+        }
+
+        $name = strtolower((string) ($app['name'] ?? ''));
+        if (str_contains($name, 'shopware') || str_contains($name, 'swr')) {
+            $score += 40;
+        }
+
+        $storeUrl = strtolower((string) ($app['store_url'] ?? ''));
+        if ($storeUrl !== '') {
+            $score += 30;
+        }
+
+        if ($this->requestHost !== '' && $storeUrl !== '' && str_contains($storeUrl, $this->requestHost)) {
+            $score += 80;
+        }
+
+        if (str_contains($storeUrl, 'localhost') || str_contains($storeUrl, '127.0.0.1')) {
+            $score += 20;
+        }
+
+        return $score;
     }
 
     private function savedAppId(): int
     {
-        $saved = $this->systemConfigService->get(self::CONFIG_APP_ID);
-        return ($saved !== null && (int) $saved > 0) ? (int) $saved : self::SHOPWARE_APP_ID_DEFAULT;
+        $saved = (int) ($this->systemConfigService->get(self::CONFIG_APP_ID) ?? 0);
+
+        // /app/list/all app ids are catalog-level small ids. Large ids are
+        // typically installed-app record ids from /app/list/my and break UI
+        // matching in account-switch flows.
+        if ($saved <= 0 || $saved > self::MAX_SANE_APP_ID) {
+            return self::SHOPWARE_APP_ID_DEFAULT;
+        }
+
+        return $saved;
     }
 
     private function generateHash(string $publicKey, string $secretKey): array
     {
+        // Keep hash generation byte-for-byte aligned with legacy WooCommerce module.
         $hashTime = (string) microtime(true);
-        $hashRand = (string) random_int(1000000, 9999999);
+        $hashRand = (string) rand(1000000, 9999999);
         $hash     = hash('sha256', $publicKey . $secretKey . $hashTime . $hashRand);
 
         return [$hashTime, $hashRand, $hash];
@@ -705,21 +1151,19 @@ class IapiController extends StorefrontController
     private function discoverAndSaveShopwareAppId(string $token, string $pub, string $sec): void
     {
         try {
-            [$hashTime, $hashRand, $hash] = $this->generateHash($pub, $sec);
+            $data = $this->callSignedEndpoint(
+                method: 'GET',
+                endpoint: '/app/list/all',
+                pub: $pub,
+                sec: $sec,
+                payload: [],
+                timeout: 10,
+                logContext: 'discoverAppId'
+            );
 
-            $response = $this->httpClient->request('GET', self::PAYTHOR_API_BASE . '/app/list/all', [
-                'headers' => [
-                    'Authorization'  => 'ApiKeys ' . $pub . ':' . $hash,
-                    'X-Timestamp'    => $hashTime,
-                    'X-Nonce'        => $hashRand,
-                    'ETC-PROGRAM-ID' => (string) self::PROGRAM_ID,
-                    'ETC-APP-ID'     => (string) self::SHOPWARE_APP_ID_DEFAULT,
-                    'Content-Type'   => 'application/json',
-                ],
-                'timeout' => 10,
-            ]);
-
-            $data = $response->toArray(false);
+            if (($data['status'] ?? '') !== 'success') {
+                return;
+            }
 
             foreach ($data['data'] ?? [] as $app) {
                 $appId = (int) ($app['id'] ?? 0);
@@ -733,6 +1177,251 @@ class IapiController extends StorefrontController
         } catch (\Throwable $e) {
             $this->logger->warning('SanalPosPro: discoverAppId failed', ['error' => $e->getMessage()]);
         }
+    }
+
+    private function callMerchantInfo(string $pub, string $sec): array
+    {
+        return $this->callSignedEndpoint(
+            method: 'POST',
+            endpoint: '/merchant/info',
+            pub: $pub,
+            sec: $sec,
+            payload: [],
+            timeout: 10,
+            logContext: 'merchantInfo'
+        );
+    }
+
+    private function callSignedEndpoint(
+        string $method,
+        string $endpoint,
+        string $pub,
+        string $sec,
+        array $payload,
+        int $timeout,
+        string $logContext
+    ): array {
+        $attempts = [
+            ['name' => 'withEtcHeaders', 'includeEtcHeaders' => true],
+            ['name' => 'withoutEtcHeaders', 'includeEtcHeaders' => false],
+        ];
+
+        $lastError = null;
+
+        foreach ($attempts as $attempt) {
+            try {
+                [$hashTime, $hashRand, $hash] = $this->generateHash($pub, $sec);
+
+                $headers = [
+                    'Authorization' => 'ApiKeys ' . $pub . ':' . $hash,
+                    'X-Timestamp'   => $hashTime,
+                    'X-Nonce'       => $hashRand,
+                    'Content-Type'  => 'application/json',
+                ];
+
+                if ($attempt['includeEtcHeaders']) {
+                    $headers['ETC-PROGRAM-ID'] = (string) self::PROGRAM_ID;
+                    $headers['ETC-APP-ID']     = (string) $this->savedAppId();
+                }
+
+                $options = [
+                    'headers' => $headers,
+                    'timeout' => $timeout,
+                ];
+
+                if (strtoupper($method) === 'GET') {
+                    if ($payload !== []) {
+                        $options['query'] = $payload;
+                    }
+                } else {
+                    $options['json'] = $payload;
+                }
+
+                $response = $this->httpClient->request($method, self::PAYTHOR_API_BASE . $endpoint, $options);
+
+                $rawBody  = $response->getContent(false);
+                $httpCode = $response->getStatusCode();
+
+                $this->logger->info('SanalPosPro: ' . $logContext . ' raw', [
+                    'attempt' => $attempt['name'],
+                    'http'    => $httpCode,
+                    'body'    => substr($rawBody, 0, 500),
+                ]);
+
+                $data = json_decode($rawBody, true);
+                if (json_last_error() !== JSON_ERROR_NONE || !is_array($data)) {
+                    return $this->error('API returned non-JSON (HTTP ' . $httpCode . '): ' . substr($rawBody, 0, 300));
+                }
+
+                if ($this->isHashErrorResponse($data) && $attempt['includeEtcHeaders']) {
+                    $lastError = $data;
+                    continue;
+                }
+
+                return $data;
+            } catch (\Throwable $e) {
+                $this->logger->warning('SanalPosPro: ' . $logContext . ' failed', [
+                    'attempt' => $attempt['name'],
+                    'error'   => $e->getMessage(),
+                ]);
+                $lastError = $this->error('Request failed: ' . $e->getMessage());
+            }
+        }
+
+        return $lastError ?? $this->error('Request failed.');
+    }
+
+    private function decodeIapiParams(string $rawParams): array
+    {
+        $decoded = json_decode($rawParams, true);
+        if (is_array($decoded)) {
+            return $decoded;
+        }
+
+        // WooCommerce flow occasionally posts escaped JSON strings.
+        $decoded = json_decode(stripslashes($rawParams), true);
+        return is_array($decoded) ? $decoded : [];
+    }
+
+    private function readAccessTokenFromParams(array $params): string
+    {
+        return trim((string) (
+            $params['iapi_accessToken']
+            ?? $params['iapi_access_token']
+            ?? $params['accessToken']
+            ?? $params['access_token']
+            ?? $params['accesstoken']
+            ?? $params['etc_token']
+            ?? $params['etc-token']
+            ?? $params['token']
+            ?? ''
+        ));
+    }
+
+    private function readAppIdFromParams(array $params): int
+    {
+        $raw = $params['iapi_appId']
+            ?? $params['iapi_app_id']
+            ?? $params['appId']
+            ?? $params['app_id']
+            ?? null;
+
+        $parsed = (int) $raw;
+        if ($parsed <= 0 || $parsed > self::MAX_SANE_APP_ID) {
+            return 0;
+        }
+
+        return $parsed;
+    }
+
+    private function buildBearerHeaders(string $token, ?int $appId = null): array
+    {
+        $resolvedAppId = $appId ?? $this->savedAppId();
+        if ($resolvedAppId <= 0 || $resolvedAppId > self::MAX_SANE_APP_ID) {
+            $resolvedAppId = self::SHOPWARE_APP_ID_DEFAULT;
+        }
+
+        return [
+            'Authorization'  => 'Bearer ' . $token,
+            'ETC-PROGRAM-ID' => (string) self::PROGRAM_ID,
+            'ETC-APP-ID'     => (string) $resolvedAppId,
+            'Content-Type'   => 'application/json',
+        ];
+    }
+
+    private function normalizeCatalogApps(array $apps): array
+    {
+        $normalized = [];
+
+        foreach ($apps as $app) {
+            if (!is_array($app)) {
+                continue;
+            }
+
+            $row  = $app;
+            $id   = (int) ($row['id'] ?? 0);
+            $name = trim((string) ($row['name'] ?? ''));
+            $slug = strtolower($name);
+
+            if (!isset($row['app_id']) && $id > 0) {
+                $row['app_id'] = $id;
+            }
+
+            if (!isset($row['appId']) && $id > 0) {
+                $row['appId'] = $id;
+            }
+
+            if (
+                $id === self::SHOPWARE_APP_ID_DEFAULT
+                || str_contains($slug, 'swr')
+                || str_contains($slug, 'shopware')
+            ) {
+                $row['name'] = 'Shopware SanalPOS PRO!';
+                $row['platform'] = 'shopware';
+            }
+
+            $normalized[] = $row;
+        }
+
+        return $normalized;
+    }
+
+    private function getSavedAccessToken(): string
+    {
+        return trim((string) ($this->systemConfigService->get(self::CONFIG_ACCESS_TOKEN) ?? ''));
+    }
+
+    private function refreshApiKeysFromSavedAccessToken(): bool
+    {
+        $token = $this->getSavedAccessToken();
+        if ($token === '') {
+            return false;
+        }
+
+        $result = $this->fetchAndSaveApiKeys($token);
+        return ($result['status'] ?? '') === 'success';
+    }
+
+    private function clearStoredApiKeys(): void
+    {
+        $this->systemConfigService->delete(self::CONFIG_PUBLIC_KEY);
+        $this->systemConfigService->delete(self::CONFIG_SECRET_KEY);
+        $this->systemConfigService->delete(self::CONFIG_APP_ID);
+    }
+
+    private function isHashErrorResponse(array $data): bool
+    {
+        if (($data['status'] ?? '') === 'success') {
+            return false;
+        }
+
+        $message = strtolower((string) ($data['message'] ?? ''));
+        return str_contains($message, 'hash') || str_contains($message, 'nonce') || str_contains($message, 'rand');
+    }
+
+    private function isMerchantMismatchResponse(array $data): bool
+    {
+        if (($data['status'] ?? '') === 'success') {
+            return false;
+        }
+
+        $message = strtolower((string) ($data['message'] ?? ''));
+        return str_contains($message, 'mismatch') || str_contains($message, 'merchant');
+    }
+
+    private function isTransportErrorResponse(array $data): bool
+    {
+        if (($data['status'] ?? '') === 'success') {
+            return false;
+        }
+
+        $message = strtolower((string) ($data['message'] ?? ''));
+
+        return str_contains($message, 'request failed:')
+            || str_contains($message, 'could not resolve host')
+            || str_contains($message, 'timed out')
+            || str_contains($message, 'connection refused')
+            || str_contains($message, 'network is unreachable');
     }
 
     private function success(string $message, array $data = []): array

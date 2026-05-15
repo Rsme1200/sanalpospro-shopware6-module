@@ -47,24 +47,100 @@ Shopware.Component.register('sanalpospro-connect-index', {
             document.head.appendChild(style);
         }
 
-        let resolvedAppId = 106;
-        try {
-            const stored = localStorage.getItem('paythor-merchant-app');
-            if (stored && !isNaN(parseInt(stored))) {
-                resolvedAppId = parseInt(stored);
-            }
-        } catch (e) { }
-
-        this._resolvedAppId = resolvedAppId;
+        this._resolvedAppId = 106;
+        this._fallbackAppIds = [];
+        this._triedAppIds = new Set();
+        this._recovering = false;
+        this.installRuntimeRecovery();
         this.loadPayThorApp();
     },
 
     beforeDestroy() {
+        if (this._runtimeErrorHandler) {
+            window.removeEventListener('error', this._runtimeErrorHandler, true);
+            this._runtimeErrorHandler = null;
+        }
+
+        if (this._runtimeRejectionHandler) {
+            window.removeEventListener('unhandledrejection', this._runtimeRejectionHandler, true);
+            this._runtimeRejectionHandler = null;
+        }
+
         this.cleanupPayThorApp();
     },
 
     methods: {
-        async loadPayThorApp() {
+        normalizeAppId(raw) {
+            const parsed = Number.parseInt(raw, 10);
+            if (!Number.isInteger(parsed) || parsed <= 0 || parsed > 1000) {
+                return null;
+            }
+
+            return parsed;
+        },
+
+        buildAppCandidates(primary) {
+            const candidates = [primary, 106, 103]
+                .map(v => this.normalizeAppId(v))
+                .filter(v => v !== null);
+
+            return candidates.filter((v, idx) => candidates.indexOf(v) === idx);
+        },
+
+        installRuntimeRecovery() {
+            if (this._runtimeErrorHandler || this._runtimeRejectionHandler) {
+                return;
+            }
+
+            const scheduleFallbackReload = (nextAppId) => {
+                this._recovering = true;
+                console.warn('SanalPosPro: runtime id crash detected, retrying with fallback app_id', nextAppId);
+
+                setTimeout(async () => {
+                    try {
+                        await this.loadPayThorApp(nextAppId);
+                    } catch (e) {
+                        console.error('SanalPosPro: fallback reload failed', e);
+                    } finally {
+                        this._recovering = false;
+                    }
+                }, 50);
+            };
+
+            const tryRecoverByMessage = (message, event) => {
+                const isIdCrash = message.includes("reading 'id'") || message.includes('reading "id"');
+                if (!isIdCrash || this._recovering) {
+                    return;
+                }
+
+                const nextAppId = Array.isArray(this._fallbackAppIds) ? this._fallbackAppIds.shift() : null;
+                if (!nextAppId) {
+                    return;
+                }
+
+                if (typeof event?.preventDefault === 'function') {
+                    event.preventDefault();
+                }
+
+                scheduleFallbackReload(nextAppId);
+            };
+
+            this._runtimeErrorHandler = (event) => {
+                const message = String(event?.message || event?.error?.message || '');
+                tryRecoverByMessage(message, event);
+            };
+
+            this._runtimeRejectionHandler = (event) => {
+                const reason = event?.reason;
+                const message = String(reason?.message || reason?.toString?.() || reason || '');
+                tryRecoverByMessage(message, event);
+            };
+
+            window.addEventListener('error', this._runtimeErrorHandler, true);
+            window.addEventListener('unhandledrejection', this._runtimeRejectionHandler, true);
+        },
+
+        async loadPayThorApp(overrideAppId = null) {
             this.cleanupPayThorApp();
 
             this._createdRoot = !document.getElementById('root');
@@ -81,24 +157,9 @@ Shopware.Component.register('sanalpospro-connect-index', {
                 }
             }
 
-            try {
-                const forcedAppId = String(this._resolvedAppId || 106);
-                const markerKey = 'paythor-connect-app-id';
-                const staleKeys = [
-                    'etc-token', 'etc-user-level', 'etc-is-impersonating',
-                    'etc-original-admin-token', 'etc-impersonate-token',
-                ];
-                if (localStorage.getItem(markerKey) !== forcedAppId) {
-                    staleKeys.forEach(k => localStorage.removeItem(k));
-                    sessionStorage.clear();
-                    localStorage.setItem(markerKey, forcedAppId);
-                }
-            } catch (e) {
-                console.warn('SanalPosPro: LocalStorage access denied', e);
-            }
-
             let xfvv = 'shopware';
             let targetPath = '/sanalpospro/iapi/index';
+            let resolvedAppId = this.normalizeAppId(this._resolvedAppId) || 106;
             let savedSettings = {
                 order_status: 'process',
                 currency_convert: 'no',
@@ -120,6 +181,10 @@ Shopware.Component.register('sanalpospro-connect-index', {
                         const cfg = await response.json();
                         xfvv = cfg.xfvv || xfvv;
                         targetPath = cfg.target_url || targetPath;
+                        const cfgAppId = this.normalizeAppId(cfg.app_id);
+                        if (cfgAppId !== null) {
+                            resolvedAppId = cfgAppId;
+                        }
                         if (cfg.module_settings && typeof cfg.module_settings === 'object') {
                             savedSettings = Object.assign(savedSettings, cfg.module_settings);
                         }
@@ -133,13 +198,42 @@ Shopware.Component.register('sanalpospro-connect-index', {
                 console.error('SanalPosPro: Error fetching admin config', e);
             }
 
-            const resolvedAppId = this._resolvedAppId || 106;
-            const CDN_BASE = `https://cdn.paythor.com/1/${resolvedAppId}/10.0.4`;
+            const selectedAppId = this.normalizeAppId(overrideAppId) || resolvedAppId;
+            const appCandidates = this.buildAppCandidates(selectedAppId);
+
+            this._triedAppIds.add(selectedAppId);
+            this._fallbackAppIds = appCandidates.filter(id => !this._triedAppIds.has(id));
+
+            try {
+                const forcedAppId = String(selectedAppId || 106);
+                const markerKey = 'paythor-connect-app-id';
+                const staleKeys = [
+                    'etc-token', 'etc-user-level', 'etc-is-impersonating',
+                    'etc-original-admin-token', 'etc-impersonate-token',
+                    'paythor-merchant-app',
+                ];
+
+                // This key may contain an installed app record id from a previous
+                // account, which breaks app matching during re-login flows.
+                localStorage.removeItem('paythor-merchant-app');
+
+                if (localStorage.getItem(markerKey) !== forcedAppId) {
+                    staleKeys.forEach(k => localStorage.removeItem(k));
+                    sessionStorage.clear();
+                    localStorage.setItem(markerKey, forcedAppId);
+                }
+            } catch (e) {
+                console.warn('SanalPosPro: LocalStorage access denied', e);
+            }
+
+            this._resolvedAppId = selectedAppId;
+            this._currentAppId = selectedAppId;
+            const CDN_BASE = `https://cdn.paythor.com/1/${selectedAppId}/10.0.4`;
 
             window.xfvv = xfvv;
             window.target_url = window.location.origin + targetPath;
             window.store_url = window.location.origin;
-            window.app_id = resolvedAppId;
+            window.app_id = selectedAppId;
             window.platform = 'shopware';
             window.program_id = 1;
             window.style_url = `${CDN_BASE}/index.css`;
