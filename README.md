@@ -280,6 +280,17 @@ bin/console database:migrate SanalPosPro
 Plugin `config.xml` formu getirmez. Ayarlar PayThor CDN paneli ve IAPI bridge uzerinden system config icine kaydedilir.
 
 - Admin > Extensions > SanalPos Pro > Account & Management
+
+<img width="2559" height="1315" alt="Ekran görüntüsü 2026-05-18 152418" src="https://github.com/user-attachments/assets/2d1698e7-63e1-497e-bc66-8edda4ba739c" />
+
+<img width="2559" height="1313" alt="Ekran görüntüsü 2026-05-18 152447" src="https://github.com/user-attachments/assets/2a86c514-b8fa-4c55-ab2f-f1eb66ccc27b" />
+
+<img width="2530" height="1307" alt="Ekran görüntüsü 2026-05-18 152522" src="https://github.com/user-attachments/assets/c9f202d2-71bb-4095-83a3-797a2561c9a1" />
+
+<img width="2528" height="1315" alt="Ekran görüntüsü 2026-05-18 152530" src="https://github.com/user-attachments/assets/911a09e8-c62d-4b94-b1fd-a8e903eaf883" />
+
+<img width="2529" height="1311" alt="Ekran görüntüsü 2026-05-18 152557" src="https://github.com/user-attachments/assets/7bd72215-85ca-437b-ac1d-d4291d100902" />
+
 - Ornek config anahtarlari:
   - `SanalPosPro.config.publicApiKey`
   - `SanalPosPro.config.secretApiKey`
@@ -295,7 +306,15 @@ Plugin `config.xml` formu getirmez. Ayarlar PayThor CDN paneli ve IAPI bridge uz
 ### Odeme Akisi (Storefront)
 
 1. Checkout payment handler `/sanalpospro/iframe/{transactionId}?returnUrl=...` adresine yonlendirir.
+
+<img width="2532" height="1309" alt="Ekran görüntüsü 2026-05-18 152733" src="https://github.com/user-attachments/assets/ee1fd3fc-2c28-429a-b740-8f4d5ca7238b" />
+
 2. Iframe sayfasi `/sanalpospro/iapi/index` ile gateway ceker, odeme oturumu olusturur ve PayThor iframe URL'ini yukler.
+
+<img width="2528" height="1313" alt="Ekran görüntüsü 2026-05-18 152909" src="https://github.com/user-attachments/assets/edf3fa98-9983-4d79-8f13-87bf76dd4fc9" />
+
+<img width="694" height="952" alt="Ekran görüntüsü 2026-05-18 152921" src="https://github.com/user-attachments/assets/a98e9236-3937-47c2-8e98-682093abe4a7" />
+
 3. PayThor callback:
    - postMessage flow: `/sanalpospro/callback` `{ source: 'paythor_sanalpospro', status, reference, message }` gonderen HTML verir.
    - full-page redirect: PayThor `p_id` ekler; controller PayThor API ile dogrular ve basarida `returnUrl&p_id=...` yonlendirir.
@@ -343,3 +362,12 @@ Sadece storefront icin:
 ```
 bin/console theme:compile
 ```
+
+## Our Team:
+Alperen Kaymaz: Software Developer alperen.kaymaz@eticsoft.com
+
+Batuhan Mutlu: Software Developer batuhan.mutlu@eticsoft.com
+
+Reem Elimam: Software Developer reem.elimam@eticsoft.com
+
+Yavuz Selim Aktaş: Software Developer yavuz.aktas@eticsoft.com
