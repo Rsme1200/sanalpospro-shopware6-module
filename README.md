@@ -39,6 +39,17 @@ bin/console database:migrate SanalPosPro
 The plugin does not ship a `config.xml` form. Configuration is stored in system config via the PayThor CDN panel and IAPI bridge.
 
 - Admin > Extensions > SanalPos Pro > Account & Management
+
+<img width="2559" height="1315" alt="Ekran görüntüsü 2026-05-18 152418" src="https://github.com/user-attachments/assets/955f2658-ea47-4696-8d6a-de5214cdadc2" />
+
+<img width="2559" height="1313" alt="Ekran görüntüsü 2026-05-18 152447" src="https://github.com/user-attachments/assets/3332be44-c695-4ce3-913f-3febe944a223" />
+
+<img width="2530" height="1307" alt="Ekran görüntüsü 2026-05-18 152522" src="https://github.com/user-attachments/assets/75083ebf-872b-433e-a423-cb740e22243e" />
+
+<img width="2528" height="1315" alt="Ekran görüntüsü 2026-05-18 152530" src="https://github.com/user-attachments/assets/15e9401c-184f-43bd-896d-0b1ef24355a3" />
+
+<img width="2529" height="1311" alt="Ekran görüntüsü 2026-05-18 152557" src="https://github.com/user-attachments/assets/a396391d-eeb5-4ec2-b75d-b3a7ee647cef" />
+
 - Settings stored under these keys (examples):
   - `SanalPosPro.config.publicApiKey`
   - `SanalPosPro.config.secretApiKey`
@@ -54,7 +65,16 @@ The plugin does not ship a `config.xml` form. Configuration is stored in system 
 ### Payment Flow (Storefront)
 
 1. Checkout payment handler redirects to `/sanalpospro/iframe/{transactionId}?returnUrl=...`.
+
+<img width="2532" height="1309" alt="Ekran görüntüsü 2026-05-18 152733" src="https://github.com/user-attachments/assets/aea6ac57-0e67-43d2-90ef-f84437007d7c" />
+
 2. The iframe page calls `/sanalpospro/iapi/index` to fetch gateways and create a payment session, then loads the PayThor iframe URL.
+
+<img width="2528" height="1313" alt="Ekran görüntüsü 2026-05-18 152909" src="https://github.com/user-attachments/assets/491f99ad-4609-4e35-9f50-6bea54371a1d" />
+
+<img width="694" height="952" alt="Ekran görüntüsü 2026-05-18 152921" src="https://github.com/user-attachments/assets/bc42bca8-e1ed-47cc-9d69-5218de96ad24" />
+
+
 3. PayThor callback:
    - postMessage flow: `/sanalpospro/callback` returns HTML that posts `{ source: 'paythor_sanalpospro', status, reference, message }`.
    - full-page redirect: PayThor appends `p_id`; controller verifies status via PayThor API and redirects to `returnUrl&p_id=...` on success.
